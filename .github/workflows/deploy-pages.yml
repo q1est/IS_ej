@@ -29,7 +29,7 @@ jobs:
 
       - name: Inject Netrun API URL
         env:
-          NETRUN_API_URL: ${{ vars.NETRUN_API_URL }}
+          NETRUN_API_URL: ${{ vars.NETRUN_API_URL || secrets.NETRUN_API_URL }}
         run: |
           node - <<'NODE'
           const fs = require('node:fs');

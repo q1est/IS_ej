@@ -14,10 +14,10 @@ defaults to `8080`).
      connection string, `sslmode=require`).
    - `JWT_SECRET` — a random value of at least 32 bytes.
    - `ALLOWED_ORIGINS` — `https://q1est.github.io`.
-4. Copy the HTTPS URL shown by Netrun and add it in GitHub under
-   **Settings → Secrets and variables → Actions → Variables** as `NETRUN_API_URL`.
-   The Pages workflow inserts it into `web/config.js`. Do not put database
-   credentials in GitHub variables or in the frontend.
+4. Copy the HTTPS URL shown by Netrun and add it in GitHub Actions as
+   `NETRUN_API_URL` (a variable or a secret). The Pages workflow inserts it into
+   `web/config.js`. Do not put database credentials in GitHub variables or in
+   the frontend.
 5. Copy the numeric Netrun project id and create these GitHub Actions secrets:
    - `NETRUN_API_KEY` — an access key from **Netrun → MCP**.
    - `NETRUN_PROJECT_ID` — the numeric project id.
