@@ -39,6 +39,17 @@ jobs:
             exit 1
           fi
 
+      - name: Set Space CORS origin
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            --request POST 'https://huggingface.co/api/spaces/q1est/school-journal-api/variables' \
+            --header "Authorization: Bearer ${HF_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --data '{"key":"ALLOWED_ORIGINS","value":"https://q1est.github.io"}'
+
       - name: Prepare Space repository
         run: |
           set -euo pipefail
