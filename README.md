@@ -35,7 +35,7 @@ Docker-образ собирается многоступенчато, запу�
 
 Workflow `.github/workflows/deploy-hf.yml` создаёт или обновляет Docker Space `q1est/school-journal-api` при каждом push в `main`.
 
-В настройках репозитория добавьте GitHub Actions secret `HF_TOKEN` с правом `write` для Hugging Face. Для запуска API в Space добавьте там secrets `DATABASE_URL` и `JWT_SECRET`. Workflow автоматически задаёт `ALLOWED_ORIGINS=https://q1est.github.io`. Значение `DATABASE_URL` должно быть PostgreSQL connection string нового Supabase проекта; пароль базы берётся из Supabase Database Settings и не помещается в Git.
+В настройках репозитория добавьте GitHub Actions secrets `HF_TOKEN` с правом `write`, `HF_DATABASE_URL` с PostgreSQL connection string нового Supabase проекта и `HF_JWT_SECRET` со случайной строкой длиной не менее 32 байт. Workflow создаёт/обновляет secrets `DATABASE_URL` и `JWT_SECRET` в Space и задаёт `ALLOWED_ORIGINS=https://q1est.github.io`. Пароль базы берётся из Supabase Database Settings и не помещается в Git.
 
 ## Основные сценарии
 

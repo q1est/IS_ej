@@ -50,6 +50,30 @@ jobs:
             --header 'Content-Type: application/json' \
             --data '{"key":"ALLOWED_ORIGINS","value":"https://q1est.github.io"}'
 
+      - name: Set Space runtime secrets
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATABASE_URL: ${{ secrets.HF_DATABASE_URL }}
+          HF_JWT_SECRET: ${{ secrets.HF_JWT_SECRET }}
+        run: |
+          set -euo pipefail
+          set_space_secret() {
+            local key="$1"
+            local value="$2"
+            if [[ -z "$value" ]]; then
+              echo "::warning::GitHub secret ${key} is not configured; the Space may not start."
+              return 0
+            fi
+            payload="$(jq -n --arg key "$key" --arg value "$value" '{key: $key, value: $value}')"
+            curl --fail-with-body --silent --show-error \
+              --request POST 'https://huggingface.co/api/spaces/q1est/school-journal-api/secrets' \
+              --header "Authorization: Bearer ${HF_TOKEN}" \
+              --header 'Content-Type: application/json' \
+              --data "$payload"
+          }
+          set_space_secret DATABASE_URL "$HF_DATABASE_URL"
+          set_space_secret JWT_SECRET "$HF_JWT_SECRET"
+
       - name: Prepare Space repository
         run: |
           set -euo pipefail
