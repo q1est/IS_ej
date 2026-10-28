@@ -154,19 +154,19 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
-	account := accounts[0]
-	principal, err := h.loadPrincipal(r.Context(), h.db, account.userID)
-	if err != nil || principal.SchoolID != account.schoolID {
+	currentAccount := accounts[0]
+	principal, err := h.loadPrincipal(r.Context(), h.db, currentAccount.userID)
+	if err != nil || principal.SchoolID != currentAccount.schoolID {
 		httpx.Error(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		return
 	}
-	if cost, err := bcrypt.Cost([]byte(account.passwordHash)); err == nil && cost < passwordCost {
+	if cost, err := bcrypt.Cost([]byte(currentAccount.passwordHash)); err == nil && cost < passwordCost {
 		upgraded, err := bcrypt.GenerateFromPassword([]byte(input.Password), passwordCost)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "internal", "Could not secure account")
 			return
 		}
-		if _, err := h.db.ExecContext(r.Context(), `UPDATE users SET password_hash=$2 WHERE id=$1 AND password_hash=$3`, account.userID, string(upgraded), account.passwordHash); err != nil {
+		if _, err := h.db.ExecContext(r.Context(), `UPDATE users SET password_hash=$2 WHERE id=$1 AND password_hash=$3`, currentAccount.userID, string(upgraded), currentAccount.passwordHash); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "internal", "Could not secure account")
 			return
 		}
