@@ -1,1 +1,1 @@
-window.APP_CONFIG = { API_BASE_URL: "http://localhost:8080" }; // Replace with your deployed HTTPS API URL.
+window.APP_CONFIG = { API_BASE_URL: "https://q1est-school-journal-api.hf.space" };

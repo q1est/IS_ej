@@ -10,18 +10,32 @@
 - `internal/platform` — PostgreSQL, HTTP-ответы, конфигурация и rate limit.
 - `internal/audit`, `internal/identity`, `internal/api` — аудит, идентификация и сборка приложения.
 - `web/js` — отдельные модули API, интерфейса, журнала, поведения, администрирования и маршрутизации.
-- `migrations` — схема БД. Применяется отдельно от запуска сервера.
+- `supabase/migrations` — версионируемая схема БД для Supabase.
 
 ## Быстрый запуск
 
-1. Создайте PostgreSQL/Supabase базу. Сохраните резервную копию, затем выполните `migrations/001_init.sql` и `migrations/002_tenant_integrity_and_behavior_status.sql` по порядку. Вторая миграция добавляет tenant-FK и стабильную привязку аккаунта ученика; она намеренно остановится на существующих неконсистентных или межшкольных связях.
+1. Supabase-проект `school-journal` (`fmkudsrekkgfmiojhprt`) уже создан. Миграции находятся в `supabase/migrations` и применяются по порядку. Вторая миграция добавляет tenant-FK и стабильную привязку аккаунта ученика; она намеренно остановится на существующих неконсистентных или межшкольных связях.
 2. Установите Go 1.23+. Настройте в терминале `DATABASE_URL`, `JWT_SECRET` (минимум 32 случайных байта), `ALLOWED_ORIGINS` (список origin через запятую) и при необходимости `PORT`. `.env.example` — образец переменных, Go сам не загружает `.env`.
 3. Выполните `go mod download`, затем `go test ./...`.
 4. Создайте первого администратора: `go run ./cmd/seedadmin --email admin@example.org --name "School Admin"`. Пароль вводится скрыто и должен содержать не менее 12 символов. Команда не сбрасывает пароль существующей учётной записи.
 5. Запустите API командой `go run ./cmd/api`. Проверка готовности: `GET /healthz`.
 6. В `web/config.js` задайте HTTPS URL API. Отдайте каталог `web` обычным статическим сервером; локально удобно использовать `python -m http.server 5500 -d web`. Добавьте origin этого сервера в `ALLOWED_ORIGINS`.
 
-Docker-образ собирается многоступенчато, запускается от непривилегированного пользователя и проверяет `/healthz`. Миграции автоматически не запускаются. GitHub Actions выполняет тесты и сборку, но не публикует образ и не деплоит приложение.
+Docker-образ собирается многоступенчато, запускается от непривилегированного пользователя и проверяет `/healthz`. GitHub Pages публикует `web/`, а workflow `deploy-hf.yml` синхронизирует backend с Hugging Face Space `q1est/school-journal-api`.
+
+## Supabase и публикация
+
+- Supabase API URL: `https://fmkudsrekkgfmiojhprt.supabase.co`.
+- Локальная конфигурация CLI уже указывает на проект `fmkudsrekkgfmiojhprt`.
+- Для будущих миграций используйте `npx supabase@latest db push` после проверки SQL.
+- GitHub Pages: `https://q1est.github.io/IS_ej/` после включения Pages с источником `GitHub Actions`.
+- Backend URL, который использует frontend: `https://q1est-school-journal-api.hf.space`.
+
+### Hugging Face sync
+
+Workflow `.github/workflows/deploy-hf.yml` создаёт или обновляет Docker Space `q1est/school-journal-api` при каждом push в `main`.
+
+В настройках репозитория добавьте GitHub Actions secret `HF_TOKEN` с правом `write` для Hugging Face. Для запуска API в Space добавьте там secrets `DATABASE_URL` и `JWT_SECRET`, а variable `ALLOWED_ORIGINS` со значением `https://q1est.github.io`. Значение `DATABASE_URL` должно быть PostgreSQL connection string нового Supabase проекта; пароль базы берётся из Supabase Database Settings и не помещается в Git.
 
 ## Основные сценарии
 
@@ -48,4 +62,4 @@ Docker-образ собирается многоступенчато, запу�
 
 Перед загрузкой персональных данных нужны независимый security review и тесты доступа с реальной тестовой PostgreSQL, MFA администратора, массовый CSV-импорт, доставка приглашений по email, изменение/отключение ролей через интерфейс, резервное копирование и юридическая проверка применимых требований к персональным данным. Интеграционные тесты прав и проверка миграций на реальном экземпляре Supabase здесь ещё не выполнены. Не используйте систему для реальных данных до этих проверок.
 
-Репозиторий пока не связан с GitHub. Автоматическая публикация Pages, выбор хостинга и деплой намеренно не настроены.
+Репозиторий связан с GitHub: `https://github.com/q1est/IS_ej`. Deployment workflows не хранят секреты в коде и не публикуют `.env`.
