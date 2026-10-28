@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.gomodcache/
+.gocache/
+*.log
+.DS_Store
+coverage.out
