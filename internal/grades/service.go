@@ -176,9 +176,10 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_input", "term_id and class_id are required")
 		return
 	}
-	query := `SELECT g.id::text,g.student_id::text,s.full_name,g.subject_id::text,g.class_id::text,g.term_id::text,
+	query := `SELECT g.id::text,g.student_id::text,s.full_name,g.subject_id::text,su.name,g.class_id::text,g.term_id::text,
 		g.value,g.grade_type,g.work_date::text,COALESCE(g.comment,'') FROM grades g JOIN students s ON s.id=g.student_id
-		JOIN classes c ON c.id=g.class_id JOIN terms t ON t.id=g.term_id WHERE g.deleted_at IS NULL AND c.school_id=$1 AND g.term_id=$2`
+		JOIN classes c ON c.id=g.class_id JOIN subjects su ON su.id=g.subject_id AND su.school_id=g.school_id
+		JOIN terms t ON t.id=g.term_id WHERE g.deleted_at IS NULL AND c.school_id=$1 AND g.term_id=$2`
 	args := []any{p.SchoolID, termID}
 	if !identity.IsAdmin(p) && !identity.HasRole(p, "student") {
 		switch {
@@ -240,14 +241,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	result := make([]map[string]any, 0)
 	for rows.Next() {
-		var id string
+		var id, subjectName string
 		var grade Grade
 		var name string
-		if err := rows.Scan(&id, &grade.StudentID, &name, &grade.SubjectID, &grade.ClassID, &grade.TermID, &grade.Value, &grade.GradeType, &grade.WorkDate, &grade.Comment); err != nil {
+		if err := rows.Scan(&id, &grade.StudentID, &name, &grade.SubjectID, &subjectName, &grade.ClassID, &grade.TermID, &grade.Value, &grade.GradeType, &grade.WorkDate, &grade.Comment); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read grades")
 			return
 		}
-		item := map[string]any{"id": id, "student_id": grade.StudentID, "student_name": name, "subject_id": grade.SubjectID, "class_id": grade.ClassID, "term_id": grade.TermID, "value": grade.Value, "grade_type": grade.GradeType, "work_date": grade.WorkDate, "comment": grade.Comment}
+		item := map[string]any{"id": id, "student_id": grade.StudentID, "student_name": name, "subject_id": grade.SubjectID, "subject_name": subjectName, "class_id": grade.ClassID, "term_id": grade.TermID, "value": grade.Value, "grade_type": grade.GradeType, "work_date": grade.WorkDate, "comment": grade.Comment}
 		result = append(result, item)
 	}
 	if err := rows.Err(); err != nil {

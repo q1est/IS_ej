@@ -1,1 +1,44 @@
-.wide-table{overflow:auto;max-width:100%}.score-cell{text-align:center;min-width:58px}.empty{padding:22px;color:#768197}.field-inline{display:flex;align-items:center;gap:10px;color:#59667d}.field-inline select{min-width:240px}.new-grade{margin:18px 0}.new-grade summary{font-weight:650;cursor:pointer}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px 18px}.form-grid>button,.form-grid>.error,.form-grid>div{align-self:end}.field-wide{grid-column:1/-1}.score-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 20px}.score-form>.btn{align-self:end;justify-self:start}.score-form>.error{align-self:end}.admin-layout{display:grid;grid-template-columns:190px minmax(0,1fr);gap:18px}.admin-tabs{display:flex;flex-direction:column;gap:6px}.admin-tab{padding:10px;border:1px solid #e6eaf1;border-radius:7px;background:white;color:#59667d;text-align:left;cursor:pointer;font:inherit}.admin-tab.selected{color:#4359df;background:#eef0ff;border-color:#d9ddff}.admin-panel{min-width:0}.invite-form{margin-top:18px}.invite-form h3{margin-top:0}.invite-form[hidden],.field[hidden]{display:none}.danger{background:#fff;color:#b32e40;border:1px solid #f1c9ce}.neutral{background:#edf0f5;color:#5b6577}.success{color:#137c52;font-size:12px}.table input,.table select{max-width:160px;padding:7px 8px;font:inherit;border:1px solid #dfe4ed;border-radius:6px}.table .btn{padding:7px 9px;font-size:11px}code{word-break:break-all}details.card{background:#fff}@media(max-width:850px){.admin-layout{grid-template-columns:1fr}.admin-tabs{flex-direction:row;overflow:auto}.admin-tab{white-space:nowrap}.form-grid,.score-form{grid-template-columns:1fr}.field-wide{grid-column:auto}.field-inline{width:100%;align-items:flex-start;flex-direction:column}.field-inline select{min-width:0;width:100%}.wide-table table{min-width:1120px}}
+.wide-table { overflow: auto; max-width: 100%; }
+.wide-table table { min-width: 1120px; }
+.behavior-desktop th { white-space: normal; vertical-align: top; line-height: 1.4; }
+.behavior-desktop th:nth-child(n + 4):nth-child(-n + 13) { min-width: 108px; max-width: 150px; }
+.score-cell { text-align: center; min-width: 58px; }
+.score-cell select { width: 56px; min-width: 52px; padding: 6px 5px; text-align: center; }
+.behavior-actions { display: flex; align-items: center; gap: 6px; }
+.behavior-row-status { display: block; max-width: 220px; margin-top: 5px; white-space: normal; font-size: 11px; }
+.empty { padding: 22px; color: #768197; }
+.field-inline { display: flex; align-items: center; gap: 10px; color: #59667d; }
+.field-inline select { min-width: 240px; }
+.new-grade { margin: 18px 0; }
+.new-grade summary { font-weight: 650; cursor: pointer; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(180px, 1fr)); gap: 10px 18px; }
+.form-grid > button, .form-grid > .error, .form-grid > div { align-self: end; }
+.field-wide { grid-column: 1 / -1; }
+.score-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 20px; }
+.score-form > .btn { align-self: end; justify-self: start; }
+.score-form > .error { align-self: end; }
+.admin-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 18px; }
+.admin-tabs { display: flex; flex-direction: column; gap: 6px; }
+.admin-tab { padding: 10px; border: 1px solid #e6eaf1; border-radius: 7px; background: #fff; color: #59667d; text-align: left; cursor: pointer; font: inherit; }
+.admin-tab.selected { color: #4359df; background: #eef0ff; border-color: #d9ddff; }
+.admin-panel { min-width: 0; }
+.invite-form { margin-top: 18px; }
+.invite-form h3 { margin-top: 0; }
+.invite-form[hidden], .field[hidden] { display: none; }
+.danger { background: #fff; color: #b32e40; border: 1px solid #f1c9ce; }
+.neutral { background: #edf0f5; color: #5b6577; }
+.success { color: #137c52; font-size: 12px; }
+.table input, .table select { max-width: 160px; padding: 7px 8px; font: inherit; border: 1px solid #dfe4ed; border-radius: 6px; }
+.table .btn { padding: 7px 9px; font-size: 11px; }
+code { word-break: break-all; }
+details.card { background: #fff; }
+
+@media (max-width: 850px) {
+  .admin-layout { grid-template-columns: 1fr; }
+  .admin-tabs { flex-direction: row; overflow: auto; }
+  .admin-tab { white-space: nowrap; }
+  .form-grid, .score-form { grid-template-columns: 1fr; }
+  .field-wide { grid-column: auto; }
+  .field-inline { width: 100%; align-items: flex-start; flex-direction: column; }
+  .field-inline select { min-width: 0; width: 100%; }
+}
