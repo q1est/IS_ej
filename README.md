@@ -21,7 +21,7 @@
 5. Запустите API командой `go run ./cmd/api`. Проверка готовности: `GET /healthz`.
 6. В `web/config.js` задайте HTTPS URL API. Отдайте каталог `web` обычным статическим сервером; локально удобно использовать `python -m http.server 5500 -d web`. Добавьте origin этого сервера в `ALLOWED_ORIGINS`.
 
-Docker-образ собирается многоступенчато, запускается от непривилегированного пользователя и проверяет `/healthz`. GitHub Pages публикует `web/`, а workflow `deploy-hf.yml` синхронизирует backend с Hugging Face Space `q1est/school-journal-api`.
+Docker-образ собирается многоступенчато, запускается от непривилегированного пользователя и проверяет `/healthz`. GitHub Pages публикует `web/`, а workflow `deploy-netrun.yml` синхронизирует backend с проектом Netrun.
 
 ## Supabase и публикация
 
@@ -29,13 +29,13 @@ Docker-образ собирается многоступенчато, запу�
 - Локальная конфигурация CLI уже указывает на проект `fmkudsrekkgfmiojhprt`.
 - Для будущих миграций используйте `npx supabase@latest db push` после проверки SQL.
 - GitHub Pages: `https://q1est.github.io/IS_ej/` после включения Pages с источником `GitHub Actions`.
-- Backend URL, который использует frontend: `https://q1est-school-journal-api.hf.space`.
+- URL backend задаётся переменной репозитория `NETRUN_API_URL`; Pages подставляет её в `web/config.js` во время публикации.
 
-### Hugging Face sync
+### Netrun deployment
 
-Workflow `.github/workflows/deploy-hf.yml` создаёт или обновляет Docker Space `q1est/school-journal-api` при каждом push в `main`.
+Пошаговая настройка находится в [`deploy/netrun/README.md`](deploy/netrun/README.md). Первый проект создаётся в кабинете Netrun из GitHub-репозитория. После этого каждый push в `main` запускает `.github/workflows/deploy-netrun.yml`, который загружает архив исходников и обновляет существующий проект.
 
-В настройках репозитория добавьте GitHub Actions secrets `HF_TOKEN` с правом `write`, `HF_DATABASE_URL` с PostgreSQL connection string нового Supabase проекта и `HF_JWT_SECRET` со случайной строкой длиной не менее 32 байт. Workflow создаёт/обновляет secrets `DATABASE_URL` и `JWT_SECRET` в Space и задаёт `ALLOWED_ORIGINS=https://q1est.github.io`. Пароль базы берётся из Supabase Database Settings и не помещается в Git.
+В настройках самого проекта Netrun задаются `DATABASE_URL`, `JWT_SECRET` и `ALLOWED_ORIGINS=https://q1est.github.io`. В GitHub Actions нужны только `NETRUN_API_KEY` и числовой `NETRUN_PROJECT_ID`; архив не содержит `.env` и секретов.
 
 ## Основные сценарии
 

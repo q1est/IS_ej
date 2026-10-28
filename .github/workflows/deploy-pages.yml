@@ -27,6 +27,20 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
 
+      - name: Inject Netrun API URL
+        env:
+          NETRUN_API_URL: ${{ vars.NETRUN_API_URL }}
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const url = (process.env.NETRUN_API_URL || '').trim();
+          if (url && !/^https:\/\//.test(url)) {
+            throw new Error('NETRUN_API_URL must be an HTTPS URL');
+          }
+          fs.writeFileSync('web/config.js', `window.APP_CONFIG = ${JSON.stringify({ API_BASE_URL: url })};\n`);
+          if (!url) console.warn('NETRUN_API_URL is not set; the published frontend will show the API configuration error.');
+          NODE
+
       - name: Upload frontend artifact
         uses: actions/upload-pages-artifact@v3
         with:

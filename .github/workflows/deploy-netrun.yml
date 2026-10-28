@@ -1,0 +1,40 @@
+name: Sync backend to Netrun
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Netrun configuration
+        id: config
+        env:
+          NETRUN_API_KEY: ${{ secrets.NETRUN_API_KEY }}
+          NETRUN_PROJECT_ID: ${{ secrets.NETRUN_PROJECT_ID }}
+        run: |
+          if [[ -z "$NETRUN_API_KEY" || -z "$NETRUN_PROJECT_ID" ]]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Add NETRUN_API_KEY and NETRUN_PROJECT_ID to enable backend sync."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create source archive
+        if: steps.config.outputs.configured == 'true'
+        run: git archive --format=zip --output=/tmp/school-journal.zip HEAD
+
+      - name: Upload backend to Netrun
+        if: steps.config.outputs.configured == 'true'
+        env:
+          NETRUN_API_KEY: ${{ secrets.NETRUN_API_KEY }}
+          NETRUN_PROJECT_ID: ${{ secrets.NETRUN_PROJECT_ID }}
+        run: node scripts/netrun-deploy.mjs /tmp/school-journal.zip
