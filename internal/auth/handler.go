@@ -360,6 +360,17 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	principal, err := h.loadPrincipal(r.Context(), tx, userID)
+	var access, refresh string
+	if err == nil {
+		access, err = h.issueAccess(principal)
+	}
+	if err == nil {
+		refresh, err = randomToken(32)
+	}
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO refresh_sessions(user_id,token_hash,expires_at,ip,user_agent)
+			VALUES($1,$2,$3,$4,$5)`, userID, tokenHash(refresh), time.Now().Add(h.refreshTTL), httpx.ClientIP(r), r.UserAgent())
+	}
 	if err == nil {
 		err = audit.Write(r.Context(), tx, r, principal, "accept_invite", "users", userID, nil, map[string]any{"role": role})
 	}
@@ -370,7 +381,10 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, "internal", "Could not complete invitation")
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"access_token": access, "refresh_token": refresh, "token_type": "Bearer",
+		"expires_in": int(h.accessTTL.Seconds()), "user": principal,
+	})
 }
 
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {

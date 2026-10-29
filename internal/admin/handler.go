@@ -27,6 +27,8 @@ func (h *Handler) Register(mux *http.ServeMux, protect func(http.Handler) http.H
 	mux.Handle("POST /admin/invites/{id}/revoke", protect(http.HandlerFunc(h.revokeInvite)))
 	mux.Handle("POST /admin/users/{id}/revoke-sessions", protect(http.HandlerFunc(h.revokeSessions)))
 	mux.Handle("GET /admin/audit", protect(http.HandlerFunc(h.auditLog)))
+	mux.Handle("GET /admin/excel", protect(http.HandlerFunc(h.exportExcel)))
+	mux.Handle("POST /admin/excel", protect(http.HandlerFunc(h.importExcel)))
 	resources := []string{"classes", "subjects", "academic-years", "terms", "teacher-assignments", "class-teacher-assignments", "behavior-criteria", "behavior-permissions", "students", "enrollments", "projects", "student-projects"}
 	for _, resource := range resources {
 		mux.Handle("POST /admin/"+resource, protect(h.createResource(resource)))

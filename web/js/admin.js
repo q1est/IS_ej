@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, apiBlob, saveBlob } from "./api.js";
 import { escapeHTML, notice, renderPage } from "./ui.js";
 
 const schemas = {
@@ -61,8 +61,12 @@ function renderAdmin(data, state = {}) {
 }
 
 function renderResources(panel, data, state = {}) {
-  panel.innerHTML = `<div class="toolbar"><label class="field-inline">Что добавить<select id="admin-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label></div><div id="resource-form"></div>
-    <h2>Записи</h2><label class="field-inline">Справочник<select id="admin-list-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label><div id="resource-table" class="table"></div>`;
+  panel.innerHTML = `<section class="card excel-tools"><div><h2>Данные Excel</h2><p class="muted">Скачайте книгу школы, отредактируйте листы и загрузите её обратно. Импорт обновляет или добавляет записи, ограничен 1 000 строками и 20 МБ. Пустые строки пропускаются; ошибка отменяет весь импорт. В ведомости поведения пустая ячейка не меняет балл, для удаления укажите «УДАЛИТЬ».</p></div>
+      <div class="toolbar"><button type="button" class="btn secondary" data-excel-download>Экспорт Excel</button><button type="button" class="btn" data-excel-select>Импорт Excel</button></div>
+      <input id="excel-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden><p id="excel-status" class="muted" aria-live="polite"></p></section>
+    <div class="toolbar"><label class="field-inline">Что добавить<select id="admin-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label></div><div id="resource-form"></div>
+    <h2>Записи</h2><label class="field-inline">Справочник<select id="admin-list-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label><div id="resource-table" class="table"></div>
+    <div class="toolbar"><button type="button" class="btn secondary" data-excel-download>Экспорт Excel</button><button type="button" class="btn" data-excel-select>Импорт Excel</button></div>`;
   const resource = panel.querySelector("#admin-resource");
   const list = panel.querySelector("#admin-list-resource");
   if (schemas[state.resource]) resource.value = state.resource;
@@ -101,6 +105,44 @@ function renderResources(panel, data, state = {}) {
   const drawList = () => drawResourceList(panel.querySelector("#resource-table"), data[list.value]);
   resource.addEventListener("change", drawForm);
   list.addEventListener("change", drawList);
+  panel.querySelectorAll("[data-excel-download]").forEach(button => button.addEventListener("click", async () => {
+    button.disabled = true;
+    const status = panel.querySelector("#excel-status");
+    status.textContent = "Формирую файл…";
+    try {
+      const blob = await apiBlob("/admin/excel");
+      saveBlob(blob, "school-data.xlsx");
+      status.textContent = "Файл Excel скачан.";
+    } catch (error) {
+      status.textContent = error.message;
+      status.className = "error";
+    } finally { button.disabled = false; }
+  }));
+  panel.querySelectorAll("[data-excel-select]").forEach(button => button.addEventListener("click", () => panel.querySelector("#excel-file").click()));
+  panel.querySelector("#excel-file").addEventListener("change", async event => {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    if (!file) return;
+    const status = panel.querySelector("#excel-status");
+    const buttons = panel.querySelectorAll("[data-excel-select]");
+    buttons.forEach(button => { button.disabled = true; });
+    status.className = "muted";
+    status.textContent = "Проверяю и импортирую данные…";
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const result = await api("/admin/excel", { method: "POST", body: form });
+      const summary = Object.entries(result.imported || {}).map(([name, count]) => `${name}: ${count}`).join("; ");
+      await showAdmin({ resource: resource.value, list: list.value, message: `Импорт завершён (${result.total} строк). ${summary}` });
+    } catch (error) {
+      const detail = error.details?.[0];
+      status.className = "error";
+      status.textContent = detail ? `${detail.sheet}, строка ${detail.row}: ${detail.reason}` : error.message;
+    } finally {
+      buttons.forEach(button => { button.disabled = false; });
+      input.value = "";
+    }
+  });
   drawForm();
   drawList();
 }

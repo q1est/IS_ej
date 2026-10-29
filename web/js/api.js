@@ -34,6 +34,7 @@ async function readResponse(response) {
   if (!response.ok) {
     const error = new Error(data.message || `HTTP ${response.status}`);
     error.status = response.status;
+    error.details = data.details || [];
     throw error;
   }
   return data;
@@ -98,10 +99,11 @@ async function rotateToken() {
 
 async function request(path, options = {}, retry = true) {
   const headers = {
-    "Content-Type": "application/json",
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...(options.headers || {}),
   };
+  // Let the browser set the multipart boundary for file uploads.
+  if (!(options.body instanceof FormData)) headers["Content-Type"] ||= "application/json";
   const { response, data } = await withRequestTimeout(async signal => {
     const response = await fetch(`${API}${path}`, { ...options, headers, signal });
     return { response, data: response.status === 401 ? null : await readResponse(response) };

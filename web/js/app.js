@@ -264,9 +264,12 @@ function bindInvite() {
       return;
     }
     try {
-      await api("/invites/accept", { method: "POST", body: JSON.stringify({ token: form.get("token"), full_name: form.get("full_name"), password: form.get("password") }) });
-      document.querySelector("#invite-error").textContent = "Аккаунт активирован. Теперь войдите по email и паролю.";
-      document.querySelector("#invite-error").className = "success";
+      const data = await api("/invites/accept", { method: "POST", body: JSON.stringify({ token: form.get("token"), full_name: form.get("full_name"), password: form.get("password") }) });
+      setSession(data);
+      const cleanURL = new URL(location.href);
+      cleanURL.searchParams.delete("invite");
+      history.replaceState(null, "", cleanURL);
+      showHome("Аккаунт активирован. Вы вошли в систему.");
     } catch (error) { document.querySelector("#invite-error").textContent = error.message; }
   });
 }
