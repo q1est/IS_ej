@@ -31,7 +31,11 @@ export async function logoutSession() {
 async function readResponse(response) {
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.message || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(data.message || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -49,8 +53,16 @@ async function withRequestTimeout(operation, externalSignal) {
   try {
     return await operation(controller.signal);
   } catch (error) {
-    if (timedOut) throw new Error("Сервер не ответил за 12 секунд. Попробуйте ещё раз.");
-    if (error instanceof TypeError) throw new Error("Не удалось подключиться к серверу. Проверьте соединение и повторите попытку.");
+    if (timedOut) {
+      const timeoutError = new Error("Сервер не ответил за 12 секунд. Попробуйте ещё раз.");
+      timeoutError.code = "request_timeout";
+      throw timeoutError;
+    }
+    if (error instanceof TypeError) {
+      const connectionError = new Error("Не удалось подключиться к серверу. Проверьте соединение и повторите попытку.");
+      connectionError.code = "network_error";
+      throw connectionError;
+    }
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -74,8 +86,10 @@ async function rotateToken() {
       accessToken = data.access_token;
       refreshToken = data.refresh_token;
       return true;
-    })().catch(() => {
-      clearSession();
+    })().catch(error => {
+      // A server outage or network timeout does not invalidate a valid session.
+      // The server explicitly rejects invalid refresh tokens with HTTP 401.
+      if (error?.status === 401) clearSession();
       return false;
     }).finally(() => { refreshPromise = null; });
   }

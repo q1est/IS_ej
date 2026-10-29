@@ -7,12 +7,24 @@ export async function showBehavior(user) {
     <div class="toolbar"><label class="field-inline">Класс и период<select id="behavior-context" disabled><option>Загрузка…</option></select></label>
     <button class="btn secondary" id="behavior-refresh">Обновить</button><button class="btn secondary" id="behavior-export">Экспорт CSV</button>
     ${user.roles.includes("admin") ? `<button class="btn" id="behavior-generate">Создать ведомости класса</button>` : ""}</div>
-    <div id="behavior-status" class="muted"></div><div id="behavior-result" class="table"></div>`);
+    <div id="behavior-status" class="muted" aria-live="polite"></div><div id="behavior-result" class="table"></div>`);
+  document.querySelector("#behavior-refresh").onclick = () => showBehavior(user);
   try {
     const [contexts, criteria] = await Promise.all([api("/behavior/contexts"), api("/behavior/criteria")]);
     if (!contexts.length || !criteria.length) {
-      if (!contexts.length) showNoContexts(document.querySelector("#behavior-status"), user);
-      else document.querySelector("#behavior-status").textContent = "Для школы не настроены критерии поведения.";
+      if (!contexts.length) {
+        showNoContexts(document.querySelector("#behavior-status"), user, document.querySelector("#behavior-context"), "Добавьте учебный год, класс и период в настройках школы.");
+        document.querySelector("#behavior-export").disabled = true;
+        document.querySelector("#behavior-generate")?.setAttribute("disabled", "");
+      }
+      else {
+        const selector = document.querySelector("#behavior-context");
+        selector.replaceChildren(new Option("Критерии не настроены", ""));
+        selector.disabled = true;
+        document.querySelector("#behavior-export").disabled = true;
+        document.querySelector("#behavior-generate")?.setAttribute("disabled", "");
+        document.querySelector("#behavior-status").textContent = "Для школы не настроены критерии поведения.";
+      }
       return;
     }
     const selector = document.querySelector("#behavior-context");
@@ -45,6 +57,9 @@ export async function showBehavior(user) {
     });
     await load();
   } catch (error) {
+    const selector = document.querySelector("#behavior-context");
+    selector.disabled = true;
+    selector.replaceChildren(new Option("Не удалось загрузить список", ""));
     document.querySelector("#behavior-status").textContent = error.message;
   }
 }

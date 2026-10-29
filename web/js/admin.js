@@ -17,11 +17,10 @@ const schemas = {
 
 function ref(key, title, resource, role) { return { key, title, type: "reference", resource, role }; }
 
-export async function showAdmin() {
+export async function showAdmin(state = {}) {
   renderPage("Администрирование", `<h1>Управление школой</h1><p class="sub">Справочники, назначения, приглашения и аудит. Каждая операция проверяется сервером.</p>
     ${notice()}<div id="admin-status" class="muted">Загружаю данные…</div><div id="admin-content"></div>`);
   try {
-    const resourceNames = [...new Set(Object.values(schemas).flatMap(schema => schema.fields.filter(field => field.resource && field.resource !== "users").map(field => field.resource)))];
     const resourcePromises = Object.keys(schemas).map(async resource => [resource, await api(`/admin/${resource}`)]);
     const [resourcePairs, users, invites, audit] = await Promise.all([
       Promise.all(resourcePromises), api("/admin/users"), api("/admin/invites"), api("/admin/audit"),
@@ -30,37 +29,48 @@ export async function showAdmin() {
     data.users = users.map(user => ({ ...user, id: user.id }));
     data.invites = invites;
     data.audit = audit;
-    renderAdmin(data);
+    renderAdmin(data, state);
   } catch (error) {
-    document.querySelector("#admin-status").textContent = error.message;
+    const status = document.querySelector("#admin-status");
+    status.textContent = error.message;
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "btn secondary";
+    retry.textContent = "Повторить";
+    retry.addEventListener("click", () => showAdmin(state));
+    status.append(" ", retry);
   }
 }
 
-function renderAdmin(data) {
+function renderAdmin(data, state = {}) {
   const output = document.querySelector("#admin-content");
-  document.querySelector("#admin-status").textContent = "";
+  const status = document.querySelector("#admin-status");
+  status.className = state.message ? "success" : "muted";
+  status.textContent = state.message || "";
   output.innerHTML = `<div class="admin-layout"><nav class="admin-tabs">${[["resources", "Справочники"], ["invites", "Приглашения"], ["users", "Пользователи"], ["audit", "Аудит"]].map(([key, title], index) => `<button class="admin-tab ${index === 0 ? "selected" : ""}" data-admin-tab="${key}">${title}</button>`).join("")}</nav>
     <section id="admin-panel"></section></div>`;
   output.querySelectorAll("[data-admin-tab]").forEach(button => button.addEventListener("click", () => {
     output.querySelectorAll("[data-admin-tab]").forEach(item => item.classList.toggle("selected", item === button));
     const panel = output.querySelector("#admin-panel");
-    if (button.dataset.adminTab === "resources") renderResources(panel, data);
+    if (button.dataset.adminTab === "resources") renderResources(panel, data, state);
     if (button.dataset.adminTab === "invites") renderInvites(panel, data);
     if (button.dataset.adminTab === "users") renderUsers(panel, data);
     if (button.dataset.adminTab === "audit") renderAudit(panel, data);
   }));
-  renderResources(output.querySelector("#admin-panel"), data);
+  renderResources(output.querySelector("#admin-panel"), data, state);
 }
 
-function renderResources(panel, data) {
+function renderResources(panel, data, state = {}) {
   panel.innerHTML = `<div class="toolbar"><label class="field-inline">Что добавить<select id="admin-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label></div><div id="resource-form"></div>
     <h2>Записи</h2><label class="field-inline">Справочник<select id="admin-list-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label><div id="resource-table" class="table"></div>`;
   const resource = panel.querySelector("#admin-resource");
   const list = panel.querySelector("#admin-list-resource");
+  if (schemas[state.resource]) resource.value = state.resource;
+  if (schemas[state.list]) list.value = state.list;
   const drawForm = () => {
     const name = resource.value;
     const schema = schemas[name];
-    panel.querySelector("#resource-form").innerHTML = `<form id="resource-create" class="card form-grid">${schema.fields.map(field => renderField(field, data)).join("")}<button class="btn">Добавить ${schema.label.toLowerCase()}</button><span id="resource-error" class="error"></span></form>`;
+    panel.querySelector("#resource-form").innerHTML = `<form id="resource-create" class="card form-grid">${schema.fields.map(field => renderField(field, data)).join("")}<button type="submit" class="btn">Добавить ${schema.label.toLowerCase()}</button><span id="resource-error" class="error"></span></form>`;
     panel.querySelector("#resource-create").addEventListener("submit", async event => {
       event.preventDefault();
       const submit = event.currentTarget.querySelector("button[type=submit]");
@@ -74,9 +84,13 @@ function renderResources(panel, data) {
       }
       try {
         await api(`/admin/${name}`, { method: "POST", body: JSON.stringify(body) });
-        panel.querySelector("#resource-error").className = "success";
-        panel.querySelector("#resource-error").textContent = `${schema.label} добавлен. Обновляю список…`;
-        await showAdmin();
+        await showAdmin({
+          resource: name,
+          list: name,
+          message: name === "students"
+            ? body.class_id ? "Ученик добавлен и зачислен в класс." : "Карточка ученика добавлена. Зачислите его в класс, чтобы данные появились в журналах."
+            : `${schema.label} добавлен.`,
+        });
       } catch (error) {
         submit.disabled = false;
         submit.textContent = `Добавить ${schema.label.toLowerCase()}`;

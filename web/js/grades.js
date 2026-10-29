@@ -3,16 +3,17 @@ import { escapeHTML, notice, renderPage, localDate, showNoContexts } from "./ui.
 
 export async function showGrades(user, selectedContext = null) {
   renderPage("Журнал", `<h1>Журнал оценок</h1><p class="sub">Выберите доступный класс, предмет и период. Роль определяет режим просмотра и редактирования.</p>
-    ${notice()}<div class="toolbar"><label class="field-inline">Класс, предмет и период<select id="grade-context" disabled><option>Загрузка…</option></select></label></div>
-    <div id="grade-status" class="muted">Загружаю доступные классы и периоды…</div><div id="grade-result" class="table"></div>`);
+    ${notice()}<div class="toolbar"><label class="field-inline">Класс, предмет и период<select id="grade-context" disabled><option>Загрузка…</option></select></label><button class="btn secondary" id="grade-refresh">Обновить</button></div>
+    <div id="grade-status" class="muted" aria-live="polite">Загружаю доступные классы и периоды…</div><div id="grade-result" class="table"></div>`);
   const status = document.querySelector("#grade-status");
+  const selector = document.querySelector("#grade-context");
+  document.querySelector("#grade-refresh").addEventListener("click", () => showGrades(user, selectedContext));
   try {
     const contexts = await api("/grades/contexts");
     if (!contexts.length) {
-      showNoContexts(status, user);
+      showNoContexts(status, user, selector);
       return;
     }
-    const selector = document.querySelector("#grade-context");
     selector.innerHTML = contexts.map((item, index) => `<option value="${index}">${escapeHTML(item.class_name)} · ${item.subject_name ? `${escapeHTML(item.subject_name)} · ` : ""}${escapeHTML(item.term_name)}</option>`).join("");
     selector.disabled = false;
     if (selectedContext) {
@@ -25,6 +26,8 @@ export async function showGrades(user, selectedContext = null) {
     selector.addEventListener("change", load);
     await load();
   } catch (error) {
+    selector.disabled = true;
+    selector.replaceChildren(new Option("Не удалось загрузить список", ""));
     status.textContent = error.message;
   }
 }
