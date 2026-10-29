@@ -6,7 +6,7 @@ const schemas = {
   classes: { label: "Класс", fields: [{ key: "name", title: "Название" }, ref("academic_year_id", "Учебный год", "academic-years")] },
   subjects: { label: "Предмет", fields: [{ key: "name", title: "Название" }] },
   terms: { label: "Период", fields: [{ key: "name", title: "Название" }, { key: "starts_on", title: "Начало", type: "date" }, { key: "ends_on", title: "Окончание", type: "date" }, ref("academic_year_id", "Учебный год", "academic-years")] },
-  students: { label: "Ученик", fields: [{ key: "external_id", title: "Табельный номер" }, { key: "full_name", title: "ФИО" }, { key: "birth_date", title: "Дата рождения", type: "date", optional: true }] },
+  students: { label: "Ученик", fields: [{ key: "external_id", title: "Табельный номер" }, { key: "full_name", title: "ФИО" }, { key: "birth_date", title: "Дата рождения", type: "date", optional: true }, { key: "class_id", title: "Класс для зачисления", type: "reference", resource: "classes", optional: true }] },
   enrollments: { label: "Зачисление", fields: [ref("student_id", "Ученик", "students"), ref("class_id", "Класс", "classes"), ref("academic_year_id", "Учебный год", "academic-years"), { key: "from_date", title: "Дата начала", type: "date", optional: true }] },
   "teacher-assignments": { label: "Назначение учителя", fields: [ref("teacher_id", "Учитель", "users", "teacher"), ref("class_id", "Класс", "classes"), ref("subject_id", "Предмет", "subjects"), ref("academic_year_id", "Учебный год", "academic-years")] },
   "class-teacher-assignments": { label: "Классное руководство", fields: [ref("teacher_id", "Учитель", "users", "class_teacher"), ref("class_id", "Класс", "classes"), ref("academic_year_id", "Учебный год", "academic-years")] },
@@ -63,6 +63,9 @@ function renderResources(panel, data) {
     panel.querySelector("#resource-form").innerHTML = `<form id="resource-create" class="card form-grid">${schema.fields.map(field => renderField(field, data)).join("")}<button class="btn">Добавить ${schema.label.toLowerCase()}</button><span id="resource-error" class="error"></span></form>`;
     panel.querySelector("#resource-create").addEventListener("submit", async event => {
       event.preventDefault();
+      const submit = event.currentTarget.querySelector("button[type=submit]");
+      submit.disabled = true;
+      submit.textContent = "Сохраняю…";
       const body = {};
       for (const field of schema.fields) {
         const input = event.currentTarget.elements[field.key];
@@ -71,8 +74,14 @@ function renderResources(panel, data) {
       }
       try {
         await api(`/admin/${name}`, { method: "POST", body: JSON.stringify(body) });
+        panel.querySelector("#resource-error").className = "success";
+        panel.querySelector("#resource-error").textContent = `${schema.label} добавлен. Обновляю список…`;
         await showAdmin();
-      } catch (error) { panel.querySelector("#resource-error").textContent = error.message; }
+      } catch (error) {
+        submit.disabled = false;
+        submit.textContent = `Добавить ${schema.label.toLowerCase()}`;
+        panel.querySelector("#resource-error").textContent = error.message;
+      }
     });
   };
   const drawList = () => drawResourceList(panel.querySelector("#resource-table"), data[list.value]);
@@ -87,7 +96,7 @@ function renderField(field, data) {
   if (field.type === "reference") {
     const options = (data[field.resource] || []).filter(item => !field.role || item.roles?.split(", ").includes(field.role));
     const label = item => item.full_name || item.name || item.email || item.id;
-    return `<label class="field">${field.title}<select name="${field.key}" ${field.optional ? "" : "required"}><option value="">Выберите…</option>${options.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(label(item))}</option>`).join("")}</select></label>`;
+    return `<label class="field">${field.title}<select name="${field.key}" ${field.optional ? "" : "required"}><option value="">${field.optional ? "Не выбирать" : "Выберите…"}</option>${options.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(label(item))}</option>`).join("")}</select></label>`;
   }
   return `<label class="field">${field.title}<input name="${field.key}" type="${field.type || "text"}" ${field.optional ? "" : "required"}></label>`;
 }

@@ -1,19 +1,20 @@
 import { api, toCSV } from "./api.js";
-import { escapeHTML, notice, renderPage, localDate } from "./ui.js";
+import { escapeHTML, notice, renderPage, localDate, showNoContexts } from "./ui.js";
 
 export async function showGrades(user, selectedContext = null) {
   renderPage("Журнал", `<h1>Журнал оценок</h1><p class="sub">Выберите доступный класс, предмет и период. Роль определяет режим просмотра и редактирования.</p>
-    ${notice()}<div class="toolbar"><label class="field-inline">Класс, предмет и период<select id="grade-context"></select></label></div>
+    ${notice()}<div class="toolbar"><label class="field-inline">Класс, предмет и период<select id="grade-context" disabled><option>Загрузка…</option></select></label></div>
     <div id="grade-status" class="muted">Загружаю доступные классы и периоды…</div><div id="grade-result" class="table"></div>`);
   const status = document.querySelector("#grade-status");
   try {
     const contexts = await api("/grades/contexts");
     if (!contexts.length) {
-      status.textContent = "Для этой учётной записи пока нет доступных классов или периодов.";
+      showNoContexts(status, user);
       return;
     }
     const selector = document.querySelector("#grade-context");
     selector.innerHTML = contexts.map((item, index) => `<option value="${index}">${escapeHTML(item.class_name)} · ${item.subject_name ? `${escapeHTML(item.subject_name)} · ` : ""}${escapeHTML(item.term_name)}</option>`).join("");
+    selector.disabled = false;
     if (selectedContext) {
       const selectedIndex = contexts.findIndex(item => item.class_id === selectedContext.class_id
         && item.term_id === selectedContext.term_id

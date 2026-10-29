@@ -1,21 +1,23 @@
 import { api, apiBlob, saveBlob } from "./api.js";
-import { escapeHTML, errorBox, notice, renderPage } from "./ui.js";
+import { escapeHTML, errorBox, notice, renderPage, showNoContexts } from "./ui.js";
 
 export async function showBehavior(user) {
   renderPage("Ведомость поведения", `<h1>Ведомость поведения</h1><p class="sub">Отдельная ведомость: проект, 10 критериев, итог и оценка.</p>
     ${notice()}<div class="rubric-scale" aria-label="Шкала оценки поведения"><b>Шкала:</b><span>0–3 балла за каждый из 10 критериев</span><span class="status green">24–30 · образцовое</span><span class="status yellow">10–23 · допустимое</span><span class="status red">0–9 · недопустимое</span></div>
-    <div class="toolbar"><label class="field-inline">Класс и период<select id="behavior-context"><option>Загрузка…</option></select></label>
+    <div class="toolbar"><label class="field-inline">Класс и период<select id="behavior-context" disabled><option>Загрузка…</option></select></label>
     <button class="btn secondary" id="behavior-refresh">Обновить</button><button class="btn secondary" id="behavior-export">Экспорт CSV</button>
     ${user.roles.includes("admin") ? `<button class="btn" id="behavior-generate">Создать ведомости класса</button>` : ""}</div>
     <div id="behavior-status" class="muted"></div><div id="behavior-result" class="table"></div>`);
   try {
     const [contexts, criteria] = await Promise.all([api("/behavior/contexts"), api("/behavior/criteria")]);
     if (!contexts.length || !criteria.length) {
-      document.querySelector("#behavior-status").textContent = contexts.length ? "Критерии ещё не настроены." : "Нет доступных классов и периодов.";
+      if (!contexts.length) showNoContexts(document.querySelector("#behavior-status"), user);
+      else document.querySelector("#behavior-status").textContent = "Для школы не настроены критерии поведения.";
       return;
     }
     const selector = document.querySelector("#behavior-context");
     selector.innerHTML = contexts.map((item, index) => `<option value="${index}">${escapeHTML(item.class_name)} · ${escapeHTML(item.term_name)}</option>`).join("");
+    selector.disabled = false;
     let selectedContext = selector.value;
     const hasUnsavedScores = () => Boolean(document.querySelector('#behavior-result tr[data-changed="true"]'));
     const load = () => loadSheets(contexts[Number(selector.value)], criteria);

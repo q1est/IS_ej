@@ -19,6 +19,23 @@ export function errorBox(message) {
   return `<p class="error">${escapeHTML(message)}</p>`;
 }
 
+export function showNoContexts(element, user) {
+  const message = document.createElement("p");
+  message.className = "empty";
+  message.textContent = user?.roles?.includes("admin")
+    ? "Добавьте учебный год, класс, предмет и период в настройках школы, чтобы открыть журнал."
+    : "Для этой учётной записи пока нет назначенных классов или периодов. Обратитесь к администратору школы.";
+  element.replaceChildren(message);
+  if (user?.roles?.includes("admin")) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn secondary";
+    button.textContent = "Настроить школу";
+    button.addEventListener("click", () => { location.hash = "admin"; });
+    element.append(button);
+  }
+}
+
 export function localDate() {
   const date = new Date();
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);

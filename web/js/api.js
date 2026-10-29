@@ -1,4 +1,5 @@
 const API = (window.APP_CONFIG?.API_BASE_URL || "").replace(/\/$/, "");
+const REQUEST_TIMEOUT_MS = 12_000;
 
 let accessToken = null;
 let refreshToken = null;
@@ -34,16 +35,42 @@ async function readResponse(response) {
   return data;
 }
 
+async function withRequestTimeout(operation, externalSignal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+  const abort = () => controller.abort();
+  if (externalSignal?.aborted) controller.abort();
+  else externalSignal?.addEventListener("abort", abort, { once: true });
+
+  try {
+    return await operation(controller.signal);
+  } catch (error) {
+    if (timedOut) throw new Error("Сервер не ответил за 12 секунд. Попробуйте ещё раз.");
+    if (error instanceof TypeError) throw new Error("Не удалось подключиться к серверу. Проверьте соединение и повторите попытку.");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    externalSignal?.removeEventListener("abort", abort);
+  }
+}
+
 async function rotateToken() {
   if (!refreshToken) return false;
   if (!refreshPromise) {
     refreshPromise = (async () => {
-      const response = await fetch(`${API}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+      const data = await withRequestTimeout(async signal => {
+        const response = await fetch(`${API}/auth/refresh`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+          signal,
+        });
+        return readResponse(response);
       });
-      const data = await readResponse(response);
       accessToken = data.access_token;
       refreshToken = data.refresh_token;
       return true;
@@ -61,11 +88,15 @@ async function request(path, options = {}, retry = true) {
     ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
     ...(options.headers || {}),
   };
-  const response = await fetch(`${API}${path}`, { ...options, headers });
+  const { response, data } = await withRequestTimeout(async signal => {
+    const response = await fetch(`${API}${path}`, { ...options, headers, signal });
+    return { response, data: response.status === 401 ? null : await readResponse(response) };
+  }, options.signal);
   if (response.status === 401 && retry && accessToken && refreshToken && path !== "/auth/refresh") {
     if (await rotateToken()) return request(path, options, false);
   }
-  return readResponse(response);
+  if (response.status === 401) return readResponse(response);
+  return data;
 }
 
 export function api(path, options = {}) {
@@ -73,17 +104,23 @@ export function api(path, options = {}) {
   return request(path, options);
 }
 
-export async function apiBlob(path) {
+export async function apiBlob(path, retry = true) {
   if (!API) throw new Error("Укажите API_BASE_URL в web/config.js");
-  const response = await fetch(`${API}${path}`, {
-    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  const result = await withRequestTimeout(async signal => {
+    const response = await fetch(`${API}${path}`, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      signal,
+    });
+    if (response.status === 401) return { response };
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.message || `HTTP ${response.status}`);
+    }
+    return { blob: await response.blob() };
   });
-  if (response.status === 401 && accessToken && refreshToken && await rotateToken()) return apiBlob(path);
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.message || `HTTP ${response.status}`);
-  }
-  return response.blob();
+  if (result.response?.status === 401 && retry && accessToken && refreshToken && await rotateToken()) return apiBlob(path, false);
+  if (result.response?.status === 401) return readResponse(result.response);
+  return result.blob;
 }
 
 export function saveBlob(blob, filename) {

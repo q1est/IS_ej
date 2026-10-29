@@ -271,8 +271,27 @@ func (h *Handler) createResource(resource string) http.Handler {
 		defer tx.Rollback()
 		var id string
 		err = tx.QueryRowContext(r.Context(), query, args...).Scan(&id)
+		if err == nil && resource == "students" {
+			var classID string
+			_ = json.Unmarshal(input["class_id"], &classID)
+			classID = strings.TrimSpace(classID)
+			if classID != "" {
+				var enrollmentID string
+				err = tx.QueryRowContext(r.Context(), `INSERT INTO enrollments(student_id,class_id,academic_year_id,status,school_id)
+					SELECT $1,c.id,c.academic_year_id,'active',c.school_id FROM classes c
+					WHERE c.id=$2 AND c.school_id=$3 RETURNING id::text`, id, classID, p.SchoolID).Scan(&enrollmentID)
+			}
+		}
 		if err == nil {
-			err = audit.Write(r.Context(), tx, r, p, "create", resource, id, nil, map[string]any{"id": id})
+			newValue := map[string]any{"id": id}
+			if resource == "students" {
+				var classID string
+				_ = json.Unmarshal(input["class_id"], &classID)
+				if classID = strings.TrimSpace(classID); classID != "" {
+					newValue["class_id"] = classID
+				}
+			}
+			err = audit.Write(r.Context(), tx, r, p, "create", resource, id, nil, newValue)
 		}
 		if err != nil || tx.Commit() != nil {
 			httpx.Error(w, http.StatusConflict, "conflict", "Could not create resource; check fields, school scope, and uniqueness")
