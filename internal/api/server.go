@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"school-journal/internal/admin"
+	"school-journal/internal/attendance"
 	"school-journal/internal/auth"
 	"school-journal/internal/behavior"
 	"school-journal/internal/config"
@@ -23,6 +24,7 @@ func New(cfg config.Config, db *sql.DB) http.Handler {
 	limiter := ratelimit.New(10, time.Minute)
 	authHandler.Register(mux, limiter)
 	studentsmodule.New(db).Register(mux, protect)
+	attendance.New(db).Register(mux, protect)
 	grades.New(db).Register(mux, protect)
 	behavior.New(db).Register(mux, protect)
 	admin.New(db).Register(mux, protect)

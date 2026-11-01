@@ -1,5 +1,6 @@
-import { api, clearSession, logoutSession, setSession } from "./api.js";
+import { api, clearSession, logoutSession, setSession, restoreSession } from "./api.js";
 import { showGrades } from "./grades.js";
+import { showAttendance } from "./attendance.js";
 import { showBehavior } from "./behavior.js";
 import { showAdmin } from "./admin.js";
 import { escapeHTML, notice, renderPage } from "./ui.js";
@@ -39,7 +40,7 @@ window.addEventListener("session-changed", event => {
   user = event.detail;
   window.currentUser = user;
   updateSidebar();
-  if (!user && ["grades", "behavior", "admin"].includes(location.hash.slice(1))) location.hash = "home";
+  if (!user && ["grades", "attendance", "behavior", "admin"].includes(location.hash.slice(1))) location.hash = "home";
 });
 
 function homeRole(currentUser) {
@@ -75,6 +76,7 @@ function loadRoleHome(role) {
       <section class="card dashboard-card"><div class="card-heading"><h2>Успеваемость</h2><button class="text-link" id="home-grades">Журнал</button></div><div id="student-grade-summary" class="dashboard-loading">Загружаю оценки…</div></section>
       <section class="card dashboard-card"><div class="card-heading"><h2>Последние оценки</h2></div><div id="student-recent-grades" class="dashboard-loading">Загружаю оценки…</div></section>
       <section class="card dashboard-card"><div class="card-heading"><h2>Ведомость поведения</h2><button class="text-link" id="home-behavior">Открыть</button></div><div id="student-behavior-summary" class="dashboard-loading">Загружаю ведомость…</div></section>
+      <section class="card dashboard-shortcut"><div class="muted">Школьный день</div><h2>Посещаемость</h2><p class="muted">Проверьте отметки посещаемости за день.</p><button class="btn secondary" id="home-attendance">Открыть посещаемость</button></section>
     </div>`;
     bindHomeNavigation();
     loadStudentDashboard(root);
@@ -85,6 +87,7 @@ function loadRoleHome(role) {
     root.innerHTML = `<div class="cards dashboard-cards">
       <section class="card dashboard-card dashboard-shortcut"><div class="muted">Оценки и сводки</div><h2>Журнал</h2><p class="muted">Выберите назначенный класс, предмет и период.</p><button class="btn" id="home-grades">Открыть журнал</button></section>
       <section class="card dashboard-card dashboard-shortcut"><div class="muted">Критерии и итог</div><h2>Ведомость поведения</h2><p class="muted">Заполняйте ведомость для классов с выданным правом.</p><button class="btn secondary" id="home-behavior">Открыть ведомость</button></section>
+      <section class="card dashboard-card dashboard-shortcut"><div class="muted">Школьный день</div><h2>Посещаемость</h2><p class="muted">Отмечайте присутствие и отсутствие в своих классах.</p><button class="btn secondary" id="home-attendance">Посещаемость класса</button></section>
     </div><section class="card context-card"><div class="card-heading"><h2>Мои классы и предметы</h2><span id="teacher-context-count" class="muted"></span></div><div id="teacher-contexts" class="context-list dashboard-loading">Загружаю назначения…</div></section>`;
     bindHomeNavigation();
     loadTeacherDashboard(root);
@@ -95,6 +98,7 @@ function loadRoleHome(role) {
     root.innerHTML = `<div class="cards dashboard-cards">
       <section class="card dashboard-shortcut"><div class="muted">Учебный процесс</div><h2>Настройка школы</h2><p class="muted">Учебный год, классы, предметы, назначения и ведомости.</p><button class="btn" id="home-admin">Управление школой</button></section>
       <section class="card dashboard-shortcut"><div class="muted">Оценки</div><h2>Журнал</h2><p class="muted">Просмотр оценок по классам, предметам и периодам.</p><button class="btn secondary" id="home-grades">Открыть журнал</button></section>
+      <section class="card dashboard-shortcut"><div class="muted">Школьный день</div><h2>Посещаемость</h2><p class="muted">Отметки посещаемости по классам и датам.</p><button class="btn secondary" id="home-attendance">Открыть посещаемость</button></section>
       <section class="card dashboard-shortcut"><div class="muted">Баллы и критерии</div><h2>Ведомость поведения</h2><p class="muted">Итоговая оценка рассчитывается по 10 критериям.</p><button class="btn secondary" id="home-behavior">Открыть ведомость</button></section>
     </div>`;
     bindHomeNavigation();
@@ -108,6 +112,7 @@ function loadRoleHome(role) {
 function bindHomeNavigation() {
   document.querySelector("#home-grades")?.addEventListener("click", () => navigate("grades"));
   document.querySelector("#home-behavior")?.addEventListener("click", () => navigate("behavior"));
+  document.querySelector("#home-attendance")?.addEventListener("click", () => navigate("attendance"));
 }
 
 async function loadStudentDashboard(root) {
@@ -290,7 +295,8 @@ async function navigate(route, selectedContext = null) {
     const context = pendingGradeContext;
     pendingGradeContext = null;
     await showGrades(user, context);
-  } else if (route === "behavior") await showBehavior(user);
+  } else if (route === "attendance") await showAttendance(user);
+  else if (route === "behavior") await showBehavior(user);
   else if (route === "admin" && user?.roles.includes("admin")) await showAdmin();
   else showHome();
 }
@@ -305,6 +311,7 @@ document.querySelector("#logout").addEventListener("click", async () => {
 });
 
 updateSidebar();
+restoreSession();
 const initialRoute = location.hash.slice(1).split("?")[0] || "home";
 if (new URLSearchParams(location.search).has("invite")) {
   location.hash = "home";

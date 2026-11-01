@@ -5,8 +5,11 @@ export function escapeHTML(value) {
 }
 
 export function renderPage(title, html) {
+  const content = document.querySelector("#content");
   document.querySelector("#title").textContent = title;
-  document.querySelector("#content").innerHTML = html;
+  content.setAttribute("aria-busy", "true");
+  content.innerHTML = html;
+  content.setAttribute("aria-busy", "false");
   const route = location.hash.slice(1) || "home";
   document.querySelectorAll(".nav").forEach(button => button.classList.toggle("active", button.dataset.page === route));
 }
