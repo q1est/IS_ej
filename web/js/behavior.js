@@ -16,8 +16,7 @@ export async function showBehavior(user) {
         showNoContexts(document.querySelector("#behavior-status"), user, document.querySelector("#behavior-context"), "Добавьте учебный год, класс и период в настройках школы.");
         document.querySelector("#behavior-export").disabled = true;
         document.querySelector("#behavior-generate")?.setAttribute("disabled", "");
-      }
-      else {
+      } else {
         const selector = document.querySelector("#behavior-context");
         selector.replaceChildren(new Option(`Настроено критериев: ${criteria.length} из 10`, ""));
         selector.disabled = true;
@@ -197,7 +196,7 @@ async function exportSheets(context, criteria) {
     const rows = [["№", "ФИО", "Проект", ...criteria.map(item => item.title), "Итого", "Оценка"]];
     sheets.forEach((sheet, index) => rows.push([index + 1, sheet.student_name, sheet.project, ...criteria.map(item => sheet.scores[item.id] ?? ""), sheet.is_complete ? sheet.total_score : "", sheet.verdict || "Не заполнено"]));
     const safe = value => { const text = String(value ?? ""); return /^[\s]*[=+\-@]/.test(text) ? `'${text}` : text; };
-    const text = "\uFEFF" + rows.map(row => row.map(value => `"${safe(value).replaceAll('"', '""')}"`).join(";")).join("\r\n");
+    const text = "﻿" + rows.map(row => row.map(value => `"${safe(value).replaceAll('"', '""')}"`).join(";")).join("\r\n");
     saveBlob(new Blob([text], { type: "text/csv;charset=utf-8" }), "behavior-class.csv");
   } catch (error) { alert(error.message); }
 }

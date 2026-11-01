@@ -212,6 +212,12 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusForbidden, "forbidden", "No access to this class and period")
 		return
 	}
+	if classID != "" && termID != "" && (identity.IsAdmin(p) || identity.HasRole(p, "teacher") || identity.HasRole(p, "class_teacher")) {
+		if err := h.ensureEnrolledSheets(r.Context(), r, p, classID, termID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not refresh behavior roster")
+			return
+		}
+	}
 	query := `SELECT bs.id::text,bs.student_id::text,s.full_name,bs.class_id::text,c.name,bs.term_id::text,t.name,bs.academic_year_id::text,bs.total_score,
 		bs.is_complete,bs.verdict,(SELECT count(*) FROM behavior_scores sc WHERE sc.behavior_sheet_id=bs.id),COALESCE((SELECT jsonb_object_agg(sc.criterion_id::text,sc.score) FROM behavior_scores sc WHERE sc.behavior_sheet_id=bs.id),'{}'::jsonb),COALESCE((SELECT p.name FROM student_projects sp JOIN projects p ON p.id=sp.project_id
 		WHERE sp.student_id=bs.student_id AND sp.academic_year_id=bs.academic_year_id AND p.school_id=$1 ORDER BY p.name LIMIT 1),'')
@@ -273,6 +279,66 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		result = append(result, map[string]any{"id": id, "student_id": studentID, "student_name": name, "class_id": classID, "class_name": className, "term_id": sheetTerm, "term_name": termName, "project": project, "total_score": score, "scores_count": scoreCount, "scores": scoreValues, "is_complete": complete, "verdict": verdictValue, "can_edit": h.canEdit(r.Context(), h.db, p, classID, yearID)})
 	}
 	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) ensureEnrolledSheets(ctx context.Context, r *http.Request, p identity.Principal, classID, termID string) error {
+	if !identity.IsAdmin(p) && !h.canAccessContext(ctx, p, classID, termID) {
+		return sql.ErrNoRows
+	}
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var academicYearID string
+	err = tx.QueryRowContext(ctx, `SELECT c.academic_year_id::text FROM classes c
+		JOIN terms t ON t.academic_year_id=c.academic_year_id WHERE c.id=$1 AND t.id=$2 AND c.school_id=$3`, classID, termID, p.SchoolID).Scan(&academicYearID)
+	if err != nil {
+		return err
+	}
+	var criterionCount int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM behavior_criteria WHERE school_id=$1`, p.SchoolID).Scan(&criterionCount); err != nil {
+		return err
+	}
+	if criterionCount != 10 {
+		return tx.Commit()
+	}
+	rows, err := tx.QueryContext(ctx, `INSERT INTO behavior_sheets(class_id,student_id,academic_year_id,term_id,total_score,is_complete,verdict,updated_by,school_id)
+		SELECT c.id,e.student_id,y.id,t.id,0,false,NULL,$5,c.school_id
+		FROM classes c JOIN academic_years y ON y.id=c.academic_year_id AND y.school_id=c.school_id AND y.id=$2
+		JOIN terms t ON t.academic_year_id=y.id AND t.id=$3
+		JOIN enrollments e ON e.class_id=c.id AND e.academic_year_id=y.id AND e.school_id=c.school_id AND e.status='active'
+		JOIN students s ON s.id=e.student_id AND s.school_id=e.school_id
+		WHERE c.id=$1 AND c.school_id=$4
+		ON CONFLICT(student_id,academic_year_id,term_id) DO NOTHING
+		RETURNING id::text,student_id::text`, classID, academicYearID, termID, p.SchoolID, p.UserID)
+	if err != nil {
+		return err
+	}
+	type createdSheet struct{ id, studentID string }
+	created := make([]createdSheet, 0)
+	for rows.Next() {
+		var sheet createdSheet
+		if err := rows.Scan(&sheet.id, &sheet.studentID); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		created = append(created, sheet)
+	}
+	rowsErr := rows.Err()
+	_ = rows.Close()
+	if rowsErr != nil {
+		return rowsErr
+	}
+	for _, sheet := range created {
+		if err := audit.Write(ctx, tx, r, p, "create", "behavior_sheets", sheet.id, nil, map[string]string{
+			"student_id": sheet.studentID, "class_id": classID, "term_id": termID, "source": "roster_refresh",
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
