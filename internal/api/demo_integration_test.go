@@ -35,6 +35,30 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `DELETE FROM grades WHERE school_id=(SELECT school_id FROM users WHERE email='admin@demo-school.local') AND left(grade_type,12)='integration_'`); err != nil {
 		t.Fatalf("clean prior integration grades: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM behavior_sheets WHERE student_id IN (SELECT id FROM students WHERE external_id LIKE 'qa-student-%')`); err != nil {
+		t.Fatalf("clean prior integration behavior sheets: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM enrollments WHERE student_id IN (SELECT id FROM students WHERE external_id LIKE 'qa-student-%')`); err != nil {
+		t.Fatalf("clean prior integration enrollments: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM invites WHERE email LIKE 'qa-student-%@demo-school.local'`); err != nil {
+		t.Fatalf("clean prior integration student invitations: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM refresh_sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'qa-student-%@demo-school.local')`); err != nil {
+		t.Fatalf("clean prior integration student sessions: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE email LIKE 'qa-student-%@demo-school.local')`); err != nil {
+		t.Fatalf("clean prior integration student roles: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE students SET user_id=NULL WHERE external_id LIKE 'qa-student-%'`); err != nil {
+		t.Fatalf("unlink prior integration student accounts: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM users WHERE email LIKE 'qa-student-%@demo-school.local'`); err != nil {
+		t.Fatalf("clean prior integration student accounts: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM students WHERE external_id LIKE 'qa-student-%'`); err != nil {
+		t.Fatalf("clean prior integration students: %v", err)
+	}
 
 	handler := api.New(config.Config{
 		JWTSecret:       []byte("integration-test-secret-with-at-least-32-bytes"),
@@ -202,26 +226,175 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 	if len(adminStudents) != 5 {
 		t.Fatalf("admin should see all 5 students in 7А, got %d", len(adminStudents))
 	}
+
+	// Snapshot any pre-existing sheets so this test can clean up only rows it owns.
+	preExistingSheetIDs := make(map[string]bool)
+	baselineRows, err := db.QueryContext(ctx, `SELECT id::text FROM behavior_sheets WHERE class_id=$1 AND term_id=$2 AND deleted_at IS NULL`, classID, termID)
+	if err != nil {
+		t.Fatalf("snapshot existing behavior sheets: %v", err)
+	}
+	for baselineRows.Next() {
+		var sheetID string
+		if err := baselineRows.Scan(&sheetID); err != nil {
+			_ = baselineRows.Close()
+			t.Fatalf("read existing behavior sheet id: %v", err)
+		}
+		preExistingSheetIDs[sheetID] = true
+	}
+	if err := baselineRows.Err(); err != nil {
+		_ = baselineRows.Close()
+		t.Fatalf("read existing behavior sheets: %v", err)
+	}
+	if err := baselineRows.Close(); err != nil {
+		t.Fatalf("close existing behavior sheets: %v", err)
+	}
+	// Establish the initial behavior roster before enrolling a new student.
+	behaviorPath := "/behavior/sheets?class_id=" + url.QueryEscape(classID) + "&term_id=" + url.QueryEscape(termID)
+	var initialBehaviorSheets []struct {
+		ID        string `json:"id"`
+		StudentID string `json:"student_id"`
+	}
+	status, body = callJSON(t, client, server.URL, http.MethodPost, "/behavior/sheets/generate", map[string]string{
+		"class_id": classID, "academic_year_id": yearID, "term_id": termID,
+	}, admin.AccessToken)
+	if status != http.StatusCreated {
+		t.Fatalf("generate initial behavior roster: status=%d body=%s", status, body)
+	}
+	status, body = callJSON(t, client, server.URL, http.MethodGet, behaviorPath, nil, admin.AccessToken)
+	if status != http.StatusOK {
+		t.Fatalf("read generated behavior roster: status=%d body=%s", status, body)
+	}
+	decodeJSON(t, body, &initialBehaviorSheets)
+	if len(initialBehaviorSheets) != 5 {
+		t.Fatalf("expected 5 initially enrolled behavior sheets, got %d", len(initialBehaviorSheets))
+	}
+	initialStudentIDs := make(map[string]bool, len(initialBehaviorSheets))
+	createdBaselineSheetIDs := make([]string, 0)
+	for _, sheet := range initialBehaviorSheets {
+		initialStudentIDs[sheet.StudentID] = true
+		if !preExistingSheetIDs[sheet.ID] {
+			createdBaselineSheetIDs = append(createdBaselineSheetIDs, sheet.ID)
+		}
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		for _, sheetID := range createdBaselineSheetIDs {
+			_, _ = db.ExecContext(cleanupCtx, `DELETE FROM behavior_sheets WHERE id=$1`, sheetID)
+		}
+	}()
+
+	// A student who accepts an invitation and is enrolled after the class
+	// behavior sheets were first generated must appear on the next roster read.
+	qaStudentEmail := fmt.Sprintf("qa-student-%d@demo-school.local", time.Now().UnixNano())
+	qaExternalID := fmt.Sprintf("qa-student-%d", time.Now().UnixNano())
+	status, body = callJSON(t, client, server.URL, http.MethodPost, "/admin/students", map[string]string{
+		"external_id": qaExternalID, "full_name": "Проверочный ученик",
+	}, admin.AccessToken)
+	if status != http.StatusCreated {
+		t.Fatalf("create behavior roster student: status=%d body=%s", status, body)
+	}
+	var qaStudent struct {
+		ID string `json:"id"`
+	}
+	decodeJSON(t, body, &qaStudent)
+	if qaStudent.ID == "" {
+		t.Fatal("created behavior roster student returned no id")
+	}
+	if initialStudentIDs[qaStudent.ID] {
+		t.Fatalf("new test student unexpectedly appeared in the initial roster: %s", qaStudent.ID)
+	}
+	defer func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM behavior_sheets WHERE student_id=$1`, qaStudent.ID)
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM enrollments WHERE student_id=$1`, qaStudent.ID)
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM invites WHERE email=$1`, qaStudentEmail)
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM refresh_sessions WHERE user_id IN (SELECT id FROM users WHERE email=$1)`, qaStudentEmail)
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM user_roles WHERE user_id IN (SELECT id FROM users WHERE email=$1)`, qaStudentEmail)
+		_, _ = db.ExecContext(cleanupCtx, `UPDATE students SET user_id=NULL WHERE id=$1`, qaStudent.ID)
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM users WHERE email=$1`, qaStudentEmail)
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM students WHERE id=$1`, qaStudent.ID)
+	}()
+	status, body = callJSON(t, client, server.URL, http.MethodPost, "/invites", map[string]string{
+		"email": qaStudentEmail, "role": "student", "target_type": "student", "target_id": qaStudent.ID,
+	}, admin.AccessToken)
+	if status != http.StatusCreated {
+		t.Fatalf("invite behavior roster student: status=%d body=%s", status, body)
+	}
+	var qaInvite struct {
+		Token string `json:"token"`
+	}
+	decodeJSON(t, body, &qaInvite)
+	status, body = callJSON(t, client, server.URL, http.MethodPost, "/invites/accept", map[string]string{
+		"token": qaInvite.Token, "full_name": "Проверочный ученик", "password": "IntegrationStudent2026!",
+	}, "")
+	if status != http.StatusOK {
+		t.Fatalf("accept behavior roster student invitation: status=%d body=%s", status, body)
+	}
+	status, body = callJSON(t, client, server.URL, http.MethodPost, "/admin/enrollments", map[string]string{
+		"student_id": qaStudent.ID, "class_id": classID, "academic_year_id": yearID,
+	}, admin.AccessToken)
+	if status != http.StatusCreated {
+		t.Fatalf("enroll behavior roster student: status=%d body=%s", status, body)
+	}
+	behaviorPath = "/behavior/sheets?class_id=" + url.QueryEscape(classID) + "&term_id=" + url.QueryEscape(termID)
+	status, body = callJSON(t, client, server.URL, http.MethodGet, behaviorPath, nil, admin.AccessToken)
+	if status != http.StatusOK {
+		t.Fatalf("read behavior roster after enrollment: status=%d body=%s", status, body)
+	}
+	var behaviorSheets []struct {
+		StudentID string `json:"student_id"`
+	}
+	decodeJSON(t, body, &behaviorSheets)
+	foundNewStudent := false
+	for _, sheet := range behaviorSheets {
+		if sheet.StudentID == qaStudent.ID {
+			foundNewStudent = true
+			break
+		}
+	}
+	if !foundNewStudent {
+		t.Fatalf("newly enrolled student missing from behavior roster: %s", body)
+	}
+
 	status, body = callJSON(t, client, server.URL, http.MethodGet, "/grades/contexts", nil, admin.AccessToken)
 	if status != http.StatusOK {
 		t.Fatalf("admin grade contexts: status=%d body=%s", status, body)
 	}
 	var adminContexts []struct {
-		ClassID string `json:"class_id"`
-		CanEdit bool   `json:"can_edit"`
+		ClassID   string `json:"class_id"`
+		SubjectID string `json:"subject_id"`
+		CanEdit   bool   `json:"can_edit"`
 	}
 	decodeJSON(t, body, &adminContexts)
 	adminCanEdit := false
+	adminSubjectContextCount := 0
 	for _, item := range adminContexts {
 		if item.ClassID == classID && item.CanEdit {
 			adminCanEdit = true
-			break
+			if item.SubjectID != "" {
+				adminSubjectContextCount++
+			}
 		}
 	}
 	if !adminCanEdit {
 		t.Fatalf("admin should receive editable grade context for 7А: %s", body)
 	}
-	adminGradePath := "/grades?class_id=" + url.QueryEscape(classID) + "&term_id=" + url.QueryEscape(termID)
+	if adminSubjectContextCount == 0 {
+		t.Fatalf("admin should receive subject-specific grade contexts for 7А: %s", body)
+	}
+	adminSubjectID := ""
+	for _, item := range adminContexts {
+		if item.ClassID == classID && item.CanEdit && item.SubjectID != "" {
+			adminSubjectID = item.SubjectID
+			break
+		}
+	}
+	if adminSubjectID == "" {
+		t.Fatalf("admin should receive subject-specific grade contexts for 7А: %s", body)
+	}
+	adminGradePath := "/grades?class_id=" + url.QueryEscape(classID) + "&term_id=" + url.QueryEscape(termID) + "&subject_id=" + url.QueryEscape(adminSubjectID)
 	status, body = callJSON(t, client, server.URL, http.MethodGet, adminGradePath, nil, admin.AccessToken)
 	if status != http.StatusOK {
 		t.Fatalf("admin list grades: status=%d body=%s", status, body)

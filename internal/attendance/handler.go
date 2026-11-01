@@ -2,6 +2,7 @@ package attendance
 
 import (
 	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -13,17 +14,17 @@ import (
 
 type Handler struct{ db *sql.DB }
 
+type contextRow struct {
+	classID, className, yearID, yearName string
+	canEdit                              bool
+}
+
 func New(db *sql.DB) *Handler { return &Handler{db: db} }
 
 func (h *Handler) Register(mux *http.ServeMux, protect func(http.Handler) http.Handler) {
 	mux.Handle("GET /attendance/contexts", protect(http.HandlerFunc(h.contexts)))
 	mux.Handle("GET /attendance", protect(http.HandlerFunc(h.listDay)))
 	mux.Handle("PUT /attendance", protect(http.HandlerFunc(h.saveDay)))
-}
-
-type contextRow struct {
-	classID, className, yearID, yearName string
-	canEdit                              bool
 }
 
 func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +59,10 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		if isMissingAttendanceTable(err) {
+			httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not list attendance contexts")
 		return
 	}
@@ -66,12 +71,20 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var item contextRow
 		if err := rows.Scan(&item.classID, &item.className, &item.yearID, &item.yearName, &item.canEdit); err != nil {
+			if isMissingAttendanceTable(err) {
+				httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+				return
+			}
 			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read attendance contexts")
 			return
 		}
 		result = append(result, map[string]any{"class_id": item.classID, "class_name": item.className, "academic_year_id": item.yearID, "academic_year_name": item.yearName, "can_edit": item.canEdit})
 	}
 	if err := rows.Err(); err != nil {
+		if isMissingAttendanceTable(err) {
+			httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read attendance contexts")
 		return
 	}
@@ -107,6 +120,10 @@ func (h *Handler) listDay(w http.ResponseWriter, r *http.Request) {
 	query += " ORDER BY s.full_name LIMIT 500"
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
+		if isMissingAttendanceTable(err) {
+			httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read attendance")
 		return
 	}
@@ -115,12 +132,20 @@ func (h *Handler) listDay(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var id, name, status, note string
 		if err := rows.Scan(&id, &name, &status, &note); err != nil {
+			if isMissingAttendanceTable(err) {
+				httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+				return
+			}
 			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read attendance")
 			return
 		}
 		result = append(result, map[string]any{"student_id": id, "student_name": name, "status": status, "note": note})
 	}
 	if err := rows.Err(); err != nil {
+		if isMissingAttendanceTable(err) {
+			httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read attendance")
 		return
 	}
@@ -183,6 +208,11 @@ func (h *Handler) saveDay(w http.ResponseWriter, r *http.Request) {
 		var oldStatus, oldNote string
 		err := tx.QueryRowContext(r.Context(), `SELECT status,note FROM attendance_records WHERE student_id=$1 AND class_id=$2 AND attendance_date=$3 AND school_id=$4 FOR UPDATE`, record.StudentID, input.ClassID, workDate, p.SchoolID).Scan(&oldStatus, &oldNote)
 		if err != nil && err != sql.ErrNoRows {
+			if isMissingAttendanceTable(err) {
+				_ = tx.Rollback()
+				httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+				return
+			}
 			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read existing attendance")
 			return
 		}
@@ -197,6 +227,10 @@ func (h *Handler) saveDay(w http.ResponseWriter, r *http.Request) {
 			VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(student_id,class_id,attendance_date)
 			DO UPDATE SET status=excluded.status,note=excluded.note,updated_at=now()`, p.SchoolID, record.StudentID, input.ClassID, workDate, record.Status, record.Note, p.UserID)
 		if err != nil {
+			if isMissingAttendanceTable(err) {
+				httpx.Error(w, http.StatusServiceUnavailable, "attendance_unavailable", "Attendance is not initialized. Apply the attendance database migration and retry.")
+				return
+			}
 			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not save attendance")
 			return
 		}
@@ -238,6 +272,11 @@ func (h *Handler) authorizeClass(r *http.Request, p identity.Principal, classID 
 		return yearID, false, enrolledOnDate
 	}
 	return yearID, canEdit, err == nil && canEdit
+}
+
+func isMissingAttendanceTable(err error) bool {
+	var pgErr interface{ SQLState() string }
+	return errors.As(err, &pgErr) && pgErr.SQLState() == "42P01"
 }
 
 func validStatus(status string) bool {

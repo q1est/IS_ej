@@ -22,7 +22,7 @@ export async function showGrades(user, selectedContext = null) {
         && (item.subject_id || "") === (selectedContext.subject_id || ""));
       if (selectedIndex >= 0) selector.value = String(selectedIndex);
     }
-    const load = () => loadContext(contexts[Number(selector.value)], user);
+    const load = () => loadContext(contexts[Number(selector.value)], user, null, "", contexts);
     selector.addEventListener("change", load);
     await load();
   } catch (error) {
@@ -32,7 +32,7 @@ export async function showGrades(user, selectedContext = null) {
   }
 }
 
-async function loadContext(context, user, draft = null, successMessage = "") {
+async function loadContext(context, user, draft = null, successMessage = "", availableContexts = []) {
   const status = document.querySelector("#grade-status");
   const output = document.querySelector("#grade-result");
   status.textContent = "Загружаю журнал…";
@@ -58,23 +58,27 @@ async function loadContext(context, user, draft = null, successMessage = "") {
       canEdit ? api(`/students?class_id=${encodeURIComponent(context.class_id)}&limit=500`) : Promise.resolve([]),
     ]);
     status.textContent = `${grades.length ? `Записей: ${grades.length}${grades.length === 1000 ? " (достигнут лимит выдачи)" : ""}` : "Оценок пока нет."}${successMessage ? ` · ${successMessage}` : ""}`;
-    const createForm = canEdit ? newGradeForm(students, draft) : "";
+    const subjectContexts = availableContexts.filter(item => item.class_id === context.class_id && item.term_id === context.term_id && item.subject_id && item.can_edit);
+    const createForm = canEdit ? newGradeForm(students, draft, subjectContexts) : "";
     const rows = grades.map(grade => canEdit ? editableGradeRow(grade) : [grade.student_name, grade.work_date, grade.value, gradeTypeLabel(grade.grade_type), grade.comment]);
     output.innerHTML = `${createForm}${grades.length ? `<div class="grade-tools"><label class="search-field"><span>Найти ученика</span><input type="search" data-grade-search placeholder="Фамилия или имя"></label><button class="btn secondary" id="grade-export">Экспорт CSV</button></div>${table(canEdit ? ["Ученик", "Дата", "Оценка", "Тип работы", "Комментарий", "Действия"] : ["Ученик", "Дата", "Оценка", "Тип работы", "Комментарий"], rows, canEdit)}` : `<p class="empty">Оценок пока нет.</p><div class="toolbar"><button class="btn secondary" id="grade-export">Экспорт CSV</button></div>`}
       <p id="grade-action-status" class="error" aria-live="polite"></p>`;
     bindTableSearch(output);
     document.querySelector("#grade-export")?.addEventListener("click", () => toCSV("grades.csv", [["Ученик", "Дата", "Оценка", "Тип работы", "Комментарий"], ...grades.map(row => [row.student_name, row.work_date, row.value, gradeTypeLabel(row.grade_type), row.comment])]));
-    if (canEdit) bindGradeEdits(output, context);
+    if (canEdit) bindGradeEdits(output, context, availableContexts);
   } catch (error) {
     status.textContent = error.message;
   }
 }
 
-function newGradeForm(students, draft = null) {
+function newGradeForm(students, draft = null, subjectContexts = []) {
   if (!students.length) return `<p class="empty">В выбранном классе нет активных учеников.</p>`;
+  if (!subjectContexts.length) return `<p class="empty">Для выбранного класса и периода не найдено доступных предметов.</p>`;
+  const subjectOptions = `<label class="field">Предмет<select name="subject_id" required>${subjectContexts.map(item => `<option value="${escapeHTML(item.subject_id)}" ${item.subject_id === (draft?.subject_id || "") ? "selected" : ""}>${escapeHTML(item.subject_name)}</option>`).join("")}</select></label>`;
   return `<details class="card new-grade" open><summary>Быстро добавить оценку</summary><form id="new-grade-form" class="form-grid">
     <label class="field field-wide">Найти ученика<input type="search" data-student-search placeholder="Начните вводить фамилию или имя"></label>
     <label class="field">Ученик<select name="student_id" required>${students.map(student => `<option value="${escapeHTML(student.id)}" ${draft?.student_id === student.id ? "selected" : ""}>${escapeHTML(student.full_name)}</option>`).join("")}</select></label>
+    ${subjectOptions}
     <label class="field">Дата<input name="work_date" type="date" value="${escapeHTML(draft?.work_date || localDate())}" required></label>
     <label class="field">Оценка<select name="value" required><option value="" disabled ${draft?.value ? "" : "selected"}>Выберите оценку</option>${[2, 3, 4, 5].map(value => `<option value="${value}" ${Number(draft?.value) === value ? "selected" : ""}>${value}</option>`).join("")}</select></label>
     <label class="field">Тип работы<select name="grade_type" required>${gradeTypeOptions(draft?.grade_type || "regular")}</select></label>
@@ -127,7 +131,7 @@ function gradeTypeOptions(selected) {
   return `${custom}${gradeTypes.map(item => `<option value="${item.value}" ${item.value === selected ? "selected" : ""}>${item.label}</option>`).join("")}`;
 }
 
-function bindGradeEdits(output, context) {
+function bindGradeEdits(output, context, availableContexts = []) {
   const studentSearch = output.querySelector("[data-student-search]");
   const studentSelect = output.querySelector('#new-grade-form [name="student_id"]');
   studentSearch?.addEventListener("input", () => {
@@ -145,15 +149,21 @@ function bindGradeEdits(output, context) {
     const error = document.querySelector("#new-grade-error");
     error.textContent = "";
     try {
+      const subjectID = form.get("subject_id") || context.subject_id;
       await api("/grades", { method: "POST", body: JSON.stringify({
-        student_id: form.get("student_id"), class_id: context.class_id, subject_id: context.subject_id,
+        student_id: form.get("student_id"), class_id: context.class_id, subject_id: subjectID,
         term_id: context.term_id, work_date: form.get("work_date"), value: Number(form.get("value")),
         grade_type: form.get("grade_type"), comment: form.get("comment"),
       }) });
-      await loadContext(context, window.currentUser, {
-        student_id: form.get("student_id"), work_date: form.get("work_date"), value: null,
+      const subjectContextIndex = availableContexts.findIndex(item => item.class_id === context.class_id
+        && item.term_id === context.term_id && item.subject_id === subjectID);
+      const subjectContext = availableContexts[subjectContextIndex] || context;
+      const contextSelector = document.querySelector("#grade-context");
+      if (subjectContextIndex >= 0 && contextSelector) contextSelector.value = String(subjectContextIndex);
+      await loadContext(subjectContext, window.currentUser, {
+        student_id: form.get("student_id"), subject_id: subjectID, work_date: form.get("work_date"), value: null,
         grade_type: form.get("grade_type"), comment: "",
-      }, "Оценка добавлена");
+      }, "Оценка добавлена", availableContexts);
     } catch (reason) { error.textContent = reason.message; }
   });
   output.querySelectorAll("[data-save-grade]").forEach(button => button.addEventListener("click", async () => {
