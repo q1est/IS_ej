@@ -432,8 +432,8 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 		} `json:"students"`
 	}
 	decodeJSON(t, body, &attendance)
-	if len(attendance.Students) != 5 {
-		t.Fatalf("admin should see all 5 enrolled students in attendance, got %d", len(attendance.Students))
+	if len(attendance.Students) != 6 {
+		t.Fatalf("admin should see all 6 enrolled students in attendance after integration enrollment, got %d", len(attendance.Students))
 	}
 	status, body = callJSON(t, client, server.URL, http.MethodPut, "/attendance", map[string]any{
 		"class_id": classID, "date": attendanceDate,
