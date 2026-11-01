@@ -23,6 +23,7 @@ func New(db *sql.DB) *Handler { return &Handler{db: db} }
 func (h *Handler) Register(mux *http.ServeMux, protect func(http.Handler) http.Handler) {
 	mux.Handle("POST /invites", protect(http.HandlerFunc(h.createInvite)))
 	mux.Handle("GET /admin/users", protect(http.HandlerFunc(h.listUsers)))
+	mux.Handle("PATCH /admin/users/{id}", protect(http.HandlerFunc(h.updateUser)))
 	mux.Handle("GET /admin/invites", protect(http.HandlerFunc(h.listInvites)))
 	mux.Handle("POST /admin/invites/{id}/revoke", protect(http.HandlerFunc(h.revokeInvite)))
 	mux.Handle("POST /admin/users/{id}/revoke-sessions", protect(http.HandlerFunc(h.revokeSessions)))
@@ -103,6 +104,135 @@ func (h *Handler) listInvites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
+	p, ok := identity.FromContext(r.Context())
+	if !ok || !identity.IsAdmin(p) {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "Administrator access required")
+		return
+	}
+	var input struct {
+		Status string   `json:"status"`
+		Roles  []string `json:"roles"`
+	}
+	if httpx.Decode(w, r, &input) != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_input", "Invalid user update")
+		return
+	}
+	input.Status = strings.TrimSpace(input.Status)
+	if input.Status != "active" && input.Status != "disabled" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_status", "Status must be active or disabled")
+		return
+	}
+	validRoles := map[string]bool{"student": true, "teacher": true, "class_teacher": true, "admin": true}
+	roles := make([]string, 0, len(input.Roles))
+	seen := map[string]bool{}
+	for _, role := range input.Roles {
+		role = strings.TrimSpace(role)
+		if !validRoles[role] || seen[role] {
+			if !validRoles[role] {
+				httpx.Error(w, http.StatusBadRequest, "invalid_role", "Invalid role")
+				return
+			}
+			continue
+		}
+		seen[role] = true
+		roles = append(roles, role)
+	}
+	if len(roles) == 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid_role", "At least one role is required")
+		return
+	}
+	userID := r.PathValue("id")
+	if userID == p.UserID && (input.Status != "active" || !seen["admin"]) {
+		httpx.Error(w, http.StatusConflict, "self_lockout", "You cannot disable or remove administrator access from your own account")
+		return
+	}
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal", "Could not update user")
+		return
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRowContext(r.Context(), `SELECT id::text FROM schools WHERE id=$1 FOR UPDATE`, p.SchoolID).Scan(new(string)); err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "School not found")
+		return
+	}
+	if userID == p.UserID && input.Status == "active" && !seen["admin"] {
+		httpx.Error(w, http.StatusConflict, "self_lockout", "You cannot remove administrator access from your own account")
+		return
+	}
+	var oldStatus string
+	var targetIsAdmin bool
+	if err := tx.QueryRowContext(r.Context(), `SELECT u.status,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND ur.school_id=u.school_id AND r.code='admin') FROM users u WHERE u.id=$1 AND u.school_id=$2 FOR UPDATE`, userID, p.SchoolID).Scan(&oldStatus, &targetIsAdmin); err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "User not found")
+		return
+	}
+	oldRoles := make([]string, 0)
+	roleRows, err := tx.QueryContext(r.Context(), `SELECT r.code FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND ur.school_id=$2 ORDER BY r.code`, userID, p.SchoolID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read user roles")
+		return
+	}
+	for roleRows.Next() {
+		var role string
+		if err := roleRows.Scan(&role); err != nil {
+			roleRows.Close()
+			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read user roles")
+			return
+		}
+		oldRoles = append(oldRoles, role)
+	}
+	if err := roleRows.Err(); err != nil {
+		roleRows.Close()
+		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read user roles")
+		return
+	}
+	roleRows.Close()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE users SET status=$1 WHERE id=$2 AND school_id=$3`, input.Status, userID, p.SchoolID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not update user status")
+		return
+	}
+	var activeAdmins int
+	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users u JOIN user_roles ur ON ur.user_id=u.id AND ur.school_id=u.school_id JOIN roles r ON r.id=ur.role_id AND r.code='admin' WHERE u.school_id=$1 AND u.status='active' AND u.id<>$2`, p.SchoolID, userID).Scan(&activeAdmins); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not check administrator safety")
+		return
+	}
+	if targetIsAdmin && (input.Status == "disabled" || !seen["admin"]) && activeAdmins == 0 {
+		httpx.Error(w, http.StatusConflict, "last_admin", "At least one active administrator must remain")
+		return
+	}
+	var revokedSessions int64
+	if input.Status == "disabled" {
+		result, err := tx.ExecContext(r.Context(), `UPDATE refresh_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, userID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not revoke disabled user sessions")
+			return
+		}
+		revokedSessions, _ = result.RowsAffected()
+	}
+	for role := range validRoles {
+		if seen[role] {
+			// Preserve any existing year/class/student scope attached to the role.
+			if _, err := tx.ExecContext(r.Context(), `INSERT INTO user_roles(user_id,role_id,school_id) SELECT $1,id,$2 FROM roles r WHERE r.code=$3 AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id=$1 AND ur.school_id=$2 AND ur.role_id=r.id)`, userID, p.SchoolID, role); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not update user roles")
+				return
+			}
+		} else if _, err := tx.ExecContext(r.Context(), `DELETE FROM user_roles ur USING roles r WHERE ur.role_id=r.id AND ur.user_id=$1 AND ur.school_id=$2 AND r.code=$3`, userID, p.SchoolID, role); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not update user roles")
+			return
+		}
+	}
+	if err := audit.Write(r.Context(), tx, r, p, "update", "users", userID, map[string]any{"status": oldStatus, "roles": oldRoles}, map[string]any{"status": input.Status, "roles": roles, "revoked_sessions": revokedSessions}); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "audit_error", "Could not record user update")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal", "Could not update user")
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"id": userID, "status": input.Status, "roles": roles, "revoked_sessions": revokedSessions})
 }
 
 func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {

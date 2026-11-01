@@ -40,7 +40,7 @@ async function loadContext(context, user, draft = null, successMessage = "") {
   try {
     const params = new URLSearchParams({ class_id: context.class_id, term_id: context.term_id });
     if (context.subject_id) params.set("subject_id", context.subject_id);
-    const isStudent = user.roles.includes("student");
+    const isStudent = user.roles.includes("student") && !user.roles.includes("admin");
     const isClassTeacher = user.roles.includes("class_teacher") && !context.subject_id && !isStudent;
     if (isClassTeacher) {
       const rows = await api(`/grades/class-summary?${params}`);

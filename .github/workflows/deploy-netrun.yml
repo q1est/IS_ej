@@ -1,22 +1,43 @@
 name: Sync backend to Netrun
 
 on:
-  push:
+  workflow_run:
+    workflows: [Go CI]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Skip stale successful runs
+        id: freshness
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch origin main --depth=1
+          if [[ "$(git rev-parse FETCH_HEAD)" == "$DEPLOY_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deploy for a commit that is no longer at the tip of main."
+          fi
 
       - name: Check Netrun configuration
         id: config
+        if: steps.freshness.outputs.current == 'true'
         env:
           NETRUN_API_KEY: ${{ secrets.NETRUN_API_KEY }}
           NETRUN_PROJECT_ID: ${{ secrets.NETRUN_PROJECT_ID }}
@@ -29,11 +50,11 @@ jobs:
           fi
 
       - name: Create source archive
-        if: steps.config.outputs.configured == 'true'
+        if: steps.freshness.outputs.current == 'true' && steps.config.outputs.configured == 'true'
         run: git archive --format=zip --output=/tmp/school-journal.zip HEAD
 
       - name: Upload backend to Netrun
-        if: steps.config.outputs.configured == 'true'
+        if: steps.freshness.outputs.current == 'true' && steps.config.outputs.configured == 'true'
         env:
           NETRUN_API_KEY: ${{ secrets.NETRUN_API_KEY }}
           NETRUN_PROJECT_ID: ${{ secrets.NETRUN_PROJECT_ID }}

@@ -43,7 +43,7 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 			FROM classes c JOIN terms t ON t.academic_year_id=c.academic_year_id
 			WHERE c.school_id=$1 ORDER BY c.name,t.starts_on LIMIT 1000`
 		args = []any{p.SchoolID}
-	case identity.HasRole(p, "student"):
+	case identity.IsStudent(p):
 		query = `SELECT c.id::text,c.name,t.id::text,t.name,c.academic_year_id::text,false
 			FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='active'
 			JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
@@ -176,21 +176,27 @@ func (h *Handler) criteria(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusUnauthorized, "unauthorized", "Authentication required")
 		return
 	}
-	rows, err := h.db.QueryContext(r.Context(), `SELECT id::text,code,title,max_score,sort_order FROM behavior_criteria WHERE school_id=$1 ORDER BY sort_order`, p.SchoolID)
+	criteria, err := h.db.QueryContext(r.Context(), `SELECT id::text,code,title,max_score,sort_order FROM behavior_criteria WHERE school_id=$1 ORDER BY sort_order`, p.SchoolID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not list criteria")
 		return
 	}
-	defer rows.Close()
+	defer criteria.Close()
 	result := make([]map[string]any, 0)
-	for rows.Next() {
+	for criteria.Next() {
+		var item map[string]any
 		var id, code, title string
 		var maxScore, order int
-		if err := rows.Scan(&id, &code, &title, &maxScore, &order); err != nil {
+		if err := criteria.Scan(&id, &code, &title, &maxScore, &order); err != nil {
 			httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read criteria")
 			return
 		}
-		result = append(result, map[string]any{"id": id, "code": code, "title": title, "max_score": maxScore, "sort_order": order})
+		item = map[string]any{"id": id, "code": code, "title": title, "max_score": maxScore, "sort_order": order}
+		result = append(result, item)
+	}
+	if err := criteria.Err(); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "db_error", "Could not read criteria")
+		return
 	}
 	httpx.JSON(w, http.StatusOK, result)
 }
@@ -202,7 +208,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classID, termID := strings.TrimSpace(r.URL.Query().Get("class_id")), strings.TrimSpace(r.URL.Query().Get("term_id"))
-	if classID != "" && !identity.IsAdmin(p) && !identity.HasRole(p, "student") && !h.canAccessContext(r.Context(), p, classID, termID) {
+	if classID != "" && !identity.IsAdmin(p) && !identity.IsStudent(p) && !h.canAccessContext(r.Context(), p, classID, termID) {
 		httpx.Error(w, http.StatusForbidden, "forbidden", "No access to this class and period")
 		return
 	}
@@ -220,7 +226,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		args = append(args, termID)
 		query += " AND bs.term_id=$" + strconv.Itoa(len(args))
 	}
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		if p.StudentID == "" {
 			httpx.JSON(w, http.StatusOK, []any{})
 			return
@@ -385,7 +391,7 @@ func (h *Handler) updateScores(w http.ResponseWriter, r *http.Request) {
 	}
 	var input struct {
 		Scores []struct {
-			CriterionID string `json:"criterion_id"`
+			CriterionID string          `json:"criterion_id"`
 			Score       json.RawMessage `json:"score"`
 		} `json:"scores"`
 	}
@@ -588,7 +594,7 @@ func (h *Handler) canView(ctx context.Context, p identity.Principal, classID, st
 	if identity.IsAdmin(p) {
 		return true
 	}
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		return p.StudentID != "" && p.StudentID == studentID
 	}
 	if !identity.HasRole(p, "teacher") && !identity.HasRole(p, "class_teacher") {

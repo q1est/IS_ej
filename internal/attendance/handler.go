@@ -38,7 +38,7 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT c.id::text,c.name,y.id::text,y.name,true
 			FROM classes c JOIN academic_years y ON y.id=c.academic_year_id AND y.school_id=c.school_id
 			WHERE c.school_id=$1 ORDER BY y.is_current DESC,y.starts_on DESC,c.name LIMIT 1000`, p.SchoolID)
-	} else if identity.HasRole(p, "student") {
+	} else if identity.IsStudent(p) {
 		rows, err = h.db.QueryContext(r.Context(), `SELECT DISTINCT c.id::text,c.name,y.id::text,y.name,false
 			FROM students s JOIN enrollments e ON e.student_id=s.id AND e.school_id=s.school_id
 			JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
@@ -100,7 +100,7 @@ func (h *Handler) listDay(w http.ResponseWriter, r *http.Request) {
 		LEFT JOIN attendance_records a ON a.student_id=s.id AND a.class_id=e.class_id AND a.attendance_date=$3 AND a.school_id=e.school_id
 		WHERE e.class_id=$1 AND e.academic_year_id=$2 AND (e.from_date IS NULL OR e.from_date<=$3) AND (e.to_date IS NULL OR e.to_date>=$3) AND e.school_id=$4`
 	args := []any{classID, yearID, parsedDate, p.SchoolID}
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		query += " AND s.user_id=$5"
 		args = append(args, p.UserID)
 	}
@@ -154,7 +154,7 @@ func (h *Handler) saveDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	yearID, _, allowed := h.authorizeClass(r, p, input.ClassID, workDate)
-	if !allowed || identity.HasRole(p, "student") {
+	if !allowed || identity.IsStudent(p) {
 		httpx.Error(w, http.StatusForbidden, "forbidden", "You cannot record attendance for this class and date")
 		return
 	}
@@ -217,7 +217,7 @@ func (h *Handler) saveDay(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) authorizeClass(r *http.Request, p identity.Principal, classID string, date time.Time) (string, bool, bool) {
-	if !identity.IsAdmin(p) && !identity.HasRole(p, "teacher") && !identity.HasRole(p, "class_teacher") && !identity.HasRole(p, "student") {
+	if !identity.IsAdmin(p) && !identity.HasRole(p, "teacher") && !identity.HasRole(p, "class_teacher") && !identity.IsStudent(p) {
 		return "", false, false
 	}
 	var yearID string
@@ -230,7 +230,7 @@ func (h *Handler) authorizeClass(r *http.Request, p identity.Principal, classID 
 	if err != nil {
 		return "", false, false
 	}
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		var enrollmentStatus string
 		var fromDate, toDate sql.NullTime
 		err = h.db.QueryRowContext(r.Context(), `SELECT e.status,e.from_date,e.to_date FROM students s JOIN enrollments e ON e.student_id=s.id AND e.school_id=s.school_id WHERE s.user_id=$1 AND s.school_id=$2 AND e.class_id=$3 AND e.academic_year_id=$4`, p.UserID, p.SchoolID, classID, yearID).Scan(&enrollmentStatus, &fromDate, &toDate)

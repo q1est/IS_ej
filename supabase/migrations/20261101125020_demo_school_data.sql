@@ -1,0 +1,5 @@
+-- Demo accounts use publicly documented passwords and must never be created by
+-- `supabase db push` on a shared or production database.
+-- Local demo data remains available through `supabase/seed.sql`, which is used
+-- only by an intentional local `supabase db reset`.
+-- This migration is intentionally a no-op to preserve migration ordering.
