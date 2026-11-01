@@ -22,9 +22,11 @@ defaults to `8080`).
    - `NETRUN_API_KEY` — an access key from **Netrun → MCP**.
    - `NETRUN_PROJECT_ID` — the numeric project id.
 
-After that, every push to `main` runs `.github/workflows/deploy-netrun.yml`.
-It uploads only the tracked source archive and does not upload `.env` files or
-runtime secrets. Netrun keeps `DATABASE_URL`, `JWT_SECRET`, and
+After that, a successful `Go CI` run for a push to `main` triggers
+`.github/workflows/deploy-netrun.yml`. The workflow checks that the tested commit
+is still the tip of `main`; stale successful runs are skipped. It uploads only
+the tracked source archive and does not upload `.env` files or runtime secrets.
+Netrun keeps `DATABASE_URL`, `JWT_SECRET`, and
 `ALLOWED_ORIGINS` in its project settings; the published Pages site receives
 only the public API URL.
 

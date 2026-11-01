@@ -233,8 +233,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .field-wide { grid-column: auto; }
   .rubric-scale { align-items: flex-start; flex-direction: column; }
   .rubric-scale .status { width: max-content; }
-  .behavior-desktop { display: none; }
-  .behavior-mobile { display: grid; gap: 10px; padding: 10px; }
+  .behavior-desktop { display: block; }
+  .behavior-mobile { display: none; }
   .excel-tools { align-items: stretch; flex-direction: column; }
   .excel-tools .toolbar { margin-bottom: 0; }
 }

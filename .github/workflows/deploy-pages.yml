@@ -1,9 +1,10 @@
 name: Deploy frontend to GitHub Pages
 
 on:
-  push:
+  workflow_run:
+    workflows: [Go CI]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,6 +17,10 @@ concurrency:
 
 jobs:
   deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -23,11 +28,28 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Skip stale successful runs
+        id: freshness
+        env:
+          DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch origin main --depth=1
+          if [[ "$(git rev-parse FETCH_HEAD)" == "$DEPLOY_SHA" ]]; then
+            echo "current=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping deploy for a commit that is no longer at the tip of main."
+          fi
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        if: steps.freshness.outputs.current == 'true'
 
       - name: Inject Netrun API URL
+        if: steps.freshness.outputs.current == 'true'
         env:
           NETRUN_API_URL: ${{ vars.NETRUN_API_URL || secrets.NETRUN_API_URL }}
         run: |
@@ -43,9 +65,11 @@ jobs:
 
       - name: Upload frontend artifact
         uses: actions/upload-pages-artifact@v3
+        if: steps.freshness.outputs.current == 'true'
         with:
           path: ./web
 
       - name: Deploy to Pages
         id: deployment
         uses: actions/deploy-pages@v4
+        if: steps.freshness.outputs.current == 'true'

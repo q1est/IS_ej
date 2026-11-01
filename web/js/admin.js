@@ -20,28 +20,35 @@ function ref(key, title, resource, role) { return { key, title, type: "reference
 export async function showAdmin(state = {}) {
   renderPage("Администрирование", `<h1>Управление школой</h1><p class="sub">Справочники, назначения, приглашения и аудит. Каждая операция проверяется сервером.</p>
     ${notice()}<div id="admin-status" class="muted">Загружаю данные…</div><div id="admin-content"></div>`);
-  try {
-    const resourcePromises = Object.keys(schemas).map(async resource => [resource, await api(`/admin/${resource}`)]);
-    const [resourcePairs, users, invites, audit] = await Promise.all([
-      Promise.all(resourcePromises), api("/admin/users"), api("/admin/invites"), api("/admin/audit"),
-    ]);
-    const data = Object.fromEntries(resourcePairs);
-    data.users = users.map(user => ({ ...user, id: user.id }));
-    data.invites = invites;
-    data.audit = audit;
-    renderAdmin(data, state);
-  } catch (error) {
+  const requests = [
+    ...Object.keys(schemas).map(resource => [`resource:${resource}`, `/admin/${resource}`]),
+    ["users", "/admin/users"], ["invites", "/admin/invites"], ["audit", "/admin/audit"],
+  ];
+  const results = await Promise.allSettled(requests.map(([, path]) => api(path)));
+  const data = {};
+  const errors = {};
+  results.forEach((result, index) => {
+    const [key] = requests[index];
+    const name = key.startsWith("resource:") ? key.slice("resource:".length) : key;
+    if (result.status === "fulfilled") data[name] = result.value;
+    else { data[name] = []; errors[name] = result.reason?.message || "Не удалось загрузить данные"; }
+  });
+  data.users = (data.users || []).map(user => ({ ...user, id: user.id }));
+  data.errors = errors;
+  renderAdmin(data, state);
+  const failedCount = Object.keys(errors).length;
+  if (failedCount) {
     const status = document.querySelector("#admin-status");
-    status.textContent = error.message;
+    status.className = "error";
+    status.textContent = `Не удалось загрузить разделов: ${failedCount}. Остальные данные доступны; откройте вкладку раздела, чтобы увидеть ошибку.`;
     const retry = document.createElement("button");
     retry.type = "button";
     retry.className = "btn secondary";
-    retry.textContent = "Повторить";
+    retry.textContent = "Обновить все данные";
     retry.addEventListener("click", () => showAdmin(state));
     status.append(" ", retry);
   }
 }
-
 function renderAdmin(data, state = {}) {
   const output = document.querySelector("#admin-content");
   const status = document.querySelector("#admin-status");
@@ -52,14 +59,14 @@ function renderAdmin(data, state = {}) {
   output.querySelectorAll("[data-admin-tab]").forEach(button => button.addEventListener("click", () => {
     output.querySelectorAll("[data-admin-tab]").forEach(item => item.classList.toggle("selected", item === button));
     const panel = output.querySelector("#admin-panel");
-    if (button.dataset.adminTab === "resources") renderResources(panel, data, state);
-    if (button.dataset.adminTab === "invites") renderInvites(panel, data);
-    if (button.dataset.adminTab === "users") renderUsers(panel, data);
-    if (button.dataset.adminTab === "audit") renderAudit(panel, data);
+    const tab = button.dataset.adminTab;
+    if (tab === "resources") renderResources(panel, data, state);
+    if (tab === "invites") renderInvites(panel, data);
+    if (tab === "users") renderUsers(panel, data);
+    if (tab === "audit") renderAudit(panel, data);
   }));
   renderResources(output.querySelector("#admin-panel"), data, state);
 }
-
 function renderResources(panel, data, state = {}) {
   panel.innerHTML = `<section class="card excel-tools"><div><h2>Данные Excel</h2><p class="muted">Скачайте книгу школы, отредактируйте листы и загрузите её обратно. Импорт обновляет или добавляет записи, ограничен 1 000 строками и 20 МБ. Пустые строки пропускаются; ошибка отменяет весь импорт. В ведомости поведения пустая ячейка не меняет балл, для удаления укажите «УДАЛИТЬ».</p></div>
       <div class="toolbar"><button type="button" class="btn secondary" data-excel-download>Экспорт Excel</button><button type="button" class="btn" data-excel-select>Импорт Excel</button></div>
@@ -102,7 +109,23 @@ function renderResources(panel, data, state = {}) {
       }
     });
   };
-  const drawList = () => drawResourceList(panel.querySelector("#resource-table"), data[list.value]);
+  const drawList = () => {
+    const target = panel.querySelector("#resource-table");
+    drawResourceList(target, data[list.value], data.errors?.[list.value]);
+    const retry = target.querySelector("[data-retry-resource]");
+    retry?.addEventListener("click", async () => {
+      retry.disabled = true;
+      retry.textContent = "Загружаю…";
+      try {
+        data[list.value] = await api(`/admin/${list.value}`);
+        delete data.errors[list.value];
+        drawList();
+      } catch (error) {
+        data.errors[list.value] = error.message;
+        drawList();
+      }
+    });
+  };
   resource.addEventListener("change", drawForm);
   list.addEventListener("change", drawList);
   panel.querySelectorAll("[data-excel-download]").forEach(button => button.addEventListener("click", async () => {
@@ -152,24 +175,28 @@ function renderField(field, data) {
   if (field.type === "reference") {
     const options = (data[field.resource] || []).filter(item => !field.role || item.roles?.split(", ").includes(field.role));
     const label = item => item.full_name || item.name || item.email || item.id;
-    return `<label class="field">${field.title}<select name="${field.key}" ${field.optional ? "" : "required"}><option value="">${field.optional ? "Не выбирать" : "Выберите…"}</option>${options.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(label(item))}</option>`).join("")}</select></label>`;
+    const help = field.resource === "users" && field.role === "teacher" && !options.length
+      ? `<small class="field-hint">Учитель появится здесь после активации приглашения. Проверьте вкладку «Пользователи».</small>` : "";
+    return `<label class="field">${field.title}<select name="${field.key}" ${field.optional ? "" : "required"}><option value="">${options.length ? (field.optional ? "Не выбирать" : "Выберите…") : "Нет доступных пользователей"}</option>${options.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(label(item))}</option>`).join("")}</select>${help}</label>`;
   }
   return `<label class="field">${field.title}<input name="${field.key}" type="${field.type || "text"}" ${field.optional ? "" : "required"}></label>`;
 }
 
-function drawResourceList(target, rows) {
+function drawResourceList(target, rows, error = "") {
+  if (error) { target.innerHTML = `<div class="notice error">${escapeHTML(error)}<button type="button" class="btn secondary" data-retry-resource>Повторить загрузку</button></div>`; return; }
   if (!rows?.length) { target.innerHTML = `<p class="empty">Записей пока нет.</p>`; return; }
   const columns = Object.keys(rows[0]);
   target.innerHTML = `<table><thead><tr>${columns.map(key => `<th>${escapeHTML(key)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(key => `<td>${escapeHTML(row[key] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function renderInvites(panel, data) {
+  if (data.errors?.invites) { renderSectionError(panel, data.errors.invites); return; }
   const students = data.students || [];
   const classes = data.classes || [];
   const years = data["academic-years"] || [];
   panel.innerHTML = `<div class="card"><h2>Новое приглашение</h2><form id="invite-form" class="form-grid">
     <label class="field">Email<input name="email" type="email" required></label>
-    <label class="field">Роль<select name="role"><option value="student">Ученик</option><option value="teacher">Учитель</option><option value="class_teacher">Классный руководитель</option><option value="admin">Администратор</option></select></label>
+    <label class="field">Роль<select name="role"><option value="student">Ученик</option><option value="teacher">Учитель</option><option value="class_teacher">Классный руководитель</option><option value="admin">Администратор</option></select><small id="invite-teacher-hint" class="field-hint" hidden>После активации приглашения учитель появится в справочнике «Назначение учителя».</small></label>
     <label class="field" id="invite-target-wrap">Ученик<select name="target_id"><option value="">Выберите ученика</option>${students.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(item.full_name)} (${escapeHTML(item.external_id)})</option>`).join("")}</select></label>
     <label class="field">Учебный год<select name="academic_year_id"><option value="">Без привязки</option>${years.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(item.name)}</option>`).join("")}</select></label>
     <div><button class="btn">Создать одноразовое приглашение</button><span id="invite-error" class="error"></span></div>
@@ -194,6 +221,8 @@ function renderInvites(panel, data) {
       target.innerHTML = "<option value=\"\"></option>";
       target.required = false;
     }
+    const teacherHint = panel.querySelector("#invite-teacher-hint");
+    if (teacherHint) teacherHint.hidden = role.value !== "teacher";
   };
   role.addEventListener("change", updateTarget);
   updateTarget();
@@ -220,7 +249,22 @@ function renderInvites(panel, data) {
 }
 
 function renderUsers(panel, data) {
-  panel.innerHTML = `<h2>Пользователи школы</h2><div class="table"><table><thead><tr><th>ФИО</th><th>Email</th><th>Роли</th><th>Статус</th><th>Действие</th></tr></thead><tbody>${data.users.map(user => `<tr><td>${escapeHTML(user.full_name)}</td><td>${escapeHTML(user.email)}</td><td>${escapeHTML(user.roles)}</td><td>${escapeHTML(user.status)}</td><td><button class="btn danger" data-revoke-user="${escapeHTML(user.id)}">Завершить сессии</button></td></tr>`).join("")}</tbody></table></div>`;
+  if (data.errors?.users) { renderSectionError(panel, data.errors.users); return; }
+  const roleOptions = ["student", "teacher", "class_teacher", "admin"];
+  panel.innerHTML = `<h2>Пользователи школы</h2><div class="table"><table><thead><tr><th>ФИО</th><th>Email</th><th>Роли</th><th>Статус</th><th>Действия</th></tr></thead><tbody>${data.users.map(user => `<tr data-user-row="${escapeHTML(user.id)}"><td>${escapeHTML(user.full_name)}</td><td>${escapeHTML(user.email)}</td><td><div class="user-role-edit">${roleOptions.map(role => `<label><input type="checkbox" data-user-role="${role}" ${user.roles?.split(", ").includes(role) ? "checked" : ""}>${role}</label>`).join("")}</div></td><td><select data-user-status><option value="active" ${user.status === "active" ? "selected" : ""}>active</option><option value="disabled" ${user.status === "disabled" ? "selected" : ""}>disabled</option></select></td><td><button class="btn" data-save-user="${escapeHTML(user.id)}">Сохранить</button> <button class="btn secondary" data-revoke-user="${escapeHTML(user.id)}">Завершить сессии</button><span class="user-action-status" role="status" aria-live="polite"></span></td></tr>`).join("")}</tbody></table></div>`;
+  panel.querySelectorAll("[data-save-user]").forEach(button => button.addEventListener("click", async () => {
+    const row = button.closest("tr");
+    const status = row.querySelector(".user-action-status");
+    const roles = [...row.querySelectorAll("[data-user-role]:checked")].map(input => input.dataset.userRole);
+    button.disabled = true;
+    status.textContent = "Сохраняю…";
+    try {
+      await api(`/admin/users/${encodeURIComponent(button.dataset.saveUser)}`, { method: "PATCH", body: JSON.stringify({ status: row.querySelector("[data-user-status]").value, roles }) });
+      status.textContent = "Сохранено";
+      status.className = "user-action-status success";
+    } catch (error) { status.textContent = error.message; status.className = "user-action-status error"; }
+    finally { button.disabled = false; }
+  }));
   panel.querySelectorAll("[data-revoke-user]").forEach(button => button.addEventListener("click", async () => {
     if (!confirm("Завершить все refresh-сессии этого пользователя?")) return;
     try { await api(`/admin/users/${encodeURIComponent(button.dataset.revokeUser)}/revoke-sessions`, { method: "POST", body: "{}" }); await showAdmin(); }
@@ -228,7 +272,13 @@ function renderUsers(panel, data) {
   }));
 }
 
+function renderSectionError(panel, message) {
+  panel.innerHTML = `<div class="notice error">${escapeHTML(message)}<button type="button" class="btn secondary" data-retry-section>Повторить загрузку</button></div>`;
+  panel.querySelector("[data-retry-section]").addEventListener("click", () => showAdmin());
+}
+
 function renderAudit(panel, data) {
+  if (data.errors?.audit) { renderSectionError(panel, data.errors.audit); return; }
   const rows = data.audit || [];
   panel.innerHTML = `<h2>Последние изменения</h2><div class="table">${tableRows(rows, ["created_at", "actor_user_id", "action", "entity", "entity_id", "old_value", "new_value"], true)}</div>`;
 }

@@ -112,7 +112,7 @@ func (h *Handler) loadPrincipal(ctx context.Context, q interface {
 	if err := rows.Err(); err != nil {
 		return p, err
 	}
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		_ = q.QueryRowContext(ctx, `SELECT id::text FROM students WHERE user_id=$1 AND school_id=$2`, userID, p.SchoolID).Scan(&p.StudentID)
 	}
 	return p, nil

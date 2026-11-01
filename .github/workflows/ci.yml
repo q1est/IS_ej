@@ -12,13 +12,47 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: school_journal
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U postgres -d school_journal"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: go mod download
+      - name: Test browser session persistence helpers
+        run: node --test web/js/api.test.mjs
+      - name: Check browser module syntax
+        shell: bash
+        run: |
+          for file in web/config.js web/js/*.js; do
+            node --input-type=module --check < "$file"
+          done
       - run: go test ./...
       - run: go vet ./...
       - run: go build ./cmd/api ./cmd/seedadmin ./cmd/healthcheck
+      - name: Validate SQL migrations and demo seed
+        env:
+          PGPASSWORD: postgres
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/school_journal?sslmode=disable
+        shell: bash
+        run: |
+          bash scripts/validate-demo-seed.sh
+      - name: Run demo API workflow smoke test
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/school_journal
+        run: go test ./internal/api -run TestDemoTeacherInvitationAssignmentAndGradeWorkflow -count=1 -v

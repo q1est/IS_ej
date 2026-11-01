@@ -31,10 +31,11 @@ func IsAdmin(principal Principal) bool {
 	return false
 }
 
+func IsStudent(principal Principal) bool {
+	return !IsAdmin(principal) && HasRole(principal, "student")
+}
+
 func HasRole(principal Principal, role string) bool {
-	if IsAdmin(principal) {
-		return true
-	}
 	for _, candidate := range principal.Roles {
 		if candidate == role {
 			return true

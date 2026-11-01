@@ -3,6 +3,7 @@ package grades
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +15,9 @@ import (
 )
 
 type Handler struct{ db *sql.DB }
+
+const maxGradeCommentLength = 500
+const maxGradeTypeLength = 40
 
 type Grade struct {
 	StudentID string `json:"student_id"`
@@ -55,7 +59,7 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 			JOIN subjects su ON su.school_id=c.school_id WHERE c.school_id=$1
 			ORDER BY c.name,su.name,t.starts_on LIMIT 1000`
 		args = []any{p.SchoolID}
-	case identity.HasRole(p, "student"):
+	case identity.IsStudent(p):
 		query = `SELECT c.id::text,c.name,t.id::text,t.name,NULL::text,NULL::text,false,c.academic_year_id::text
 			FROM students s JOIN enrollments e ON e.student_id=s.id AND e.status='active'
 			JOIN classes c ON c.id=e.class_id AND c.school_id=e.school_id
@@ -63,20 +67,30 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 			WHERE s.user_id=$1 AND e.school_id=$2 ORDER BY c.name,t.starts_on LIMIT 1000`
 		args = []any{p.UserID, p.SchoolID}
 	default:
-		if !identity.HasRole(p, "teacher") && !identity.HasRole(p, "class_teacher") {
+		isTeacher := identity.HasRole(p, "teacher")
+		isClassTeacher := identity.HasRole(p, "class_teacher")
+		if !isTeacher && !isClassTeacher {
 			httpx.Error(w, http.StatusForbidden, "forbidden", "Insufficient role")
 			return
 		}
-		query = `SELECT c.id::text,c.name,t.id::text,t.name,su.id::text,su.name,true,c.academic_year_id::text
+		teacherQuery := `SELECT c.id::text,c.name,t.id::text,t.name,su.id::text,su.name,true,c.academic_year_id::text
 			FROM teacher_assignments ta JOIN classes c ON c.id=ta.class_id
 			JOIN subjects su ON su.id=ta.subject_id JOIN terms t ON t.academic_year_id=ta.academic_year_id
 			WHERE ta.teacher_id=$1 AND ta.school_id=$2
-			UNION ALL
-		SELECT c.id::text,c.name,t.id::text,t.name,NULL::text,NULL::text,false,c.academic_year_id::text
+			`
+		classTeacherQuery := `SELECT c.id::text,c.name,t.id::text,t.name,NULL::text,NULL::text,false,c.academic_year_id::text
 			FROM class_teacher_assignments ca JOIN classes c ON c.id=ca.class_id
 			JOIN terms t ON t.academic_year_id=ca.academic_year_id
 			WHERE ca.teacher_id=$1 AND ca.school_id=$2
-			ORDER BY 2,6,4 LIMIT 1000`
+			`
+		switch {
+		case isTeacher && isClassTeacher:
+			query = teacherQuery + " UNION ALL " + classTeacherQuery + " ORDER BY 2,6,4 LIMIT 1000"
+		case isTeacher:
+			query = teacherQuery + " ORDER BY 2,6,4 LIMIT 1000"
+		default:
+			query = classTeacherQuery + " ORDER BY 2,6,4 LIMIT 1000"
+		}
 		args = []any{p.UserID, p.SchoolID}
 	}
 	rows, err := h.db.QueryContext(r.Context(), query, args...)
@@ -172,7 +186,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	classID := strings.TrimSpace(r.URL.Query().Get("class_id"))
 	termID := strings.TrimSpace(r.URL.Query().Get("term_id"))
 	subjectID := strings.TrimSpace(r.URL.Query().Get("subject_id"))
-	if termID == "" || (!identity.HasRole(p, "student") && classID == "") {
+	if termID == "" || (!identity.IsStudent(p) && classID == "") {
 		httpx.Error(w, http.StatusBadRequest, "invalid_input", "term_id and class_id are required")
 		return
 	}
@@ -181,7 +195,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		JOIN classes c ON c.id=g.class_id JOIN subjects su ON su.id=g.subject_id AND su.school_id=g.school_id
 		JOIN terms t ON t.id=g.term_id WHERE g.deleted_at IS NULL AND c.school_id=$1 AND g.term_id=$2`
 	args := []any{p.SchoolID, termID}
-	if !identity.IsAdmin(p) && !identity.HasRole(p, "student") {
+	if !identity.IsAdmin(p) && !identity.IsStudent(p) {
 		switch {
 		case identity.HasRole(p, "teacher"):
 			var allowed bool
@@ -213,7 +227,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		args = append(args, subjectID)
 		query += " AND g.subject_id=$" + strconv.Itoa(len(args))
 	}
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		if p.StudentID == "" {
 			httpx.JSON(w, http.StatusOK, []any{})
 			return
@@ -269,8 +283,13 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_input", "Student, class, subject, term, value, and work_date are required")
 		return
 	}
+	input.GradeType = strings.TrimSpace(input.GradeType)
 	if input.GradeType == "" {
 		input.GradeType = "regular"
+	}
+	if len(input.GradeType) > maxGradeTypeLength || len(input.Comment) > maxGradeCommentLength {
+		httpx.Error(w, http.StatusBadRequest, "invalid_input", "Grade type or comment is too long")
+		return
 	}
 	if !h.canTeach(r.Context(), p, input.ClassID, input.SubjectID, input.TermID) {
 		httpx.Error(w, http.StatusForbidden, "forbidden", "No assignment for this class and subject")
@@ -357,8 +376,8 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	if input.Comment != nil {
 		updated.Comment = *input.Comment
 	}
-	if updated.Value < 1 || updated.Value > 5 || !validWorkDate(updated.WorkDate) || updated.GradeType == "" {
-		httpx.Error(w, http.StatusBadRequest, "invalid_input", "Invalid grade value, type, or date")
+	if updated.Value < 1 || updated.Value > 5 || !validWorkDate(updated.WorkDate) || updated.GradeType == "" || len(updated.GradeType) > maxGradeTypeLength || len(updated.Comment) > maxGradeCommentLength {
+		httpx.Error(w, http.StatusBadRequest, "invalid_input", "Invalid grade value, type, date, or comment length")
 		return
 	}
 	_, err = tx.ExecContext(r.Context(), `UPDATE grades SET value=$2,grade_type=$3,work_date=$4,comment=NULLIF($5,''),updated_at=now() WHERE id=$1`, id, updated.Value, updated.GradeType, updated.WorkDate, updated.Comment)
@@ -460,13 +479,23 @@ func (h *Handler) canTeachTx(ctx context.Context, q interface {
 	if identity.IsAdmin(p) {
 		return true
 	}
+	if !identity.HasRole(p, "teacher") {
+		return false
+	}
 	var allowed bool
-	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM teacher_assignments ta JOIN terms t ON t.id=$4 AND t.academic_year_id=ta.academic_year_id JOIN classes c ON c.id=ta.class_id AND c.school_id=$5 AND c.academic_year_id=ta.academic_year_id JOIN subjects su ON su.id=ta.subject_id AND su.school_id=$5 WHERE ta.teacher_id=$1 AND ta.class_id=$2 AND ta.subject_id=$3 AND ta.school_id=$5)`, p.UserID, classID, subjectID, termID, p.SchoolID).Scan(&allowed)
+	err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM teacher_assignments ta JOIN terms t ON t.id=$4 AND t.academic_year_id=ta.academic_year_id JOIN classes c ON c.id=ta.class_id AND c.school_id=$5 AND c.academic_year_id=ta.academic_year_id JOIN subjects su ON su.id=ta.subject_id AND su.school_id=$5 WHERE ta.teacher_id=$1 AND ta.class_id=$2 AND ta.subject_id=$3 AND ta.school_id=$5 AND EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 AND ur.school_id=$5 AND r.code='teacher'))`, p.UserID, classID, subjectID, termID, p.SchoolID).Scan(&allowed)
 	return err == nil && allowed
 }
 
 func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(strings.ToLower(err.Error()), "duplicate key")
+	if err == nil {
+		return false
+	}
+	var pgErr interface{ SQLState() string }
+	if errors.As(err, &pgErr) && pgErr.SQLState() == "23505" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "duplicate key")
 }
 
 func validWorkDate(value string) bool {

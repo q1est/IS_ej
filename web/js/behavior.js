@@ -11,7 +11,7 @@ export async function showBehavior(user) {
   document.querySelector("#behavior-refresh").onclick = () => showBehavior(user);
   try {
     const [contexts, criteria] = await Promise.all([api("/behavior/contexts"), api("/behavior/criteria")]);
-    if (!contexts.length || !criteria.length) {
+    if (!contexts.length || criteria.length !== 10) {
       if (!contexts.length) {
         showNoContexts(document.querySelector("#behavior-status"), user, document.querySelector("#behavior-context"), "Добавьте учебный год, класс и период в настройках школы.");
         document.querySelector("#behavior-export").disabled = true;
@@ -19,11 +19,11 @@ export async function showBehavior(user) {
       }
       else {
         const selector = document.querySelector("#behavior-context");
-        selector.replaceChildren(new Option("Критерии не настроены", ""));
+        selector.replaceChildren(new Option(`Настроено критериев: ${criteria.length} из 10`, ""));
         selector.disabled = true;
         document.querySelector("#behavior-export").disabled = true;
         document.querySelector("#behavior-generate")?.setAttribute("disabled", "");
-        document.querySelector("#behavior-status").textContent = "Для школы не настроены критерии поведения.";
+        document.querySelector("#behavior-status").textContent = "Для создания ведомостей требуется ровно 10 критериев. Настройте их в Excel → «Критерии поведения» и импортируйте книгу.";
       }
       return;
     }

@@ -31,7 +31,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	classID := strings.TrimSpace(r.URL.Query().Get("class_id"))
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		rows, err := h.db.QueryContext(r.Context(), `SELECT id::text,external_id,full_name FROM students
 			WHERE school_id=$1 AND user_id=$2 ORDER BY full_name LIMIT $3 OFFSET $4`, p.SchoolID, p.UserID, limit, offset)
 		if err != nil {
@@ -75,7 +75,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	if identity.HasRole(p, "student") {
+	if identity.IsStudent(p) {
 		if p.StudentID == "" || id != p.StudentID {
 			httpx.Error(w, http.StatusNotFound, "not_found", "Student not found")
 			return
