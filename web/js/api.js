@@ -1,17 +1,29 @@
 const API = (window.APP_CONFIG?.API_BASE_URL || "").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 12_000;
+const SESSION_KEY = "school-journal-session";
 
 let accessToken = null;
 let refreshToken = null;
 let refreshPromise = null;
 
+function persistSession() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || "{}");
+    if (refreshToken) sessionStorage.setItem(SESSION_KEY, JSON.stringify({ ...saved, access_token: accessToken, refresh_token: refreshToken }));
+  } catch {}
+}
+
 export function setSession(data) {
   accessToken = data?.access_token || null;
   refreshToken = data?.refresh_token || null;
+  if (accessToken && refreshToken) {
+    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch {}
+  }
   window.dispatchEvent(new CustomEvent("session-changed", { detail: data?.user || null }));
 }
 
 export function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
   accessToken = null;
   refreshToken = null;
   window.dispatchEvent(new CustomEvent("session-changed", { detail: null }));
@@ -86,6 +98,7 @@ async function rotateToken() {
       });
       accessToken = data.access_token;
       refreshToken = data.refresh_token;
+      persistSession();
       return true;
     })().catch(error => {
       // A server outage or network timeout does not invalidate a valid session.
@@ -155,4 +168,17 @@ export function toCSV(filename, rows) {
   };
   const content = "\uFEFF" + rows.map(row => row.map(value => `"${safe(value).replaceAll('"', '""')}"`).join(";")).join("\r\n");
   saveBlob(new Blob([content], { type: "text/csv;charset=utf-8" }), filename);
+}
+
+export function restoreSession() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data?.access_token || !data?.refresh_token) return null;
+    accessToken = data.access_token;
+    refreshToken = data.refresh_token;
+    window.dispatchEvent(new CustomEvent("session-changed", { detail: data.user || null }));
+    return data;
+  } catch { return null; }
 }
