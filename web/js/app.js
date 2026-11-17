@@ -1,11 +1,13 @@
-import { api, clearSession, logoutSession, setSession, restoreSession } from "./api.js";
+import { api, clearSession, logoutSession, setSession, restoreSession, ensureServerReady } from "./api.js";
 import { showGrades } from "./grades.js";
 import { showAttendance } from "./attendance.js";
 import { showBehavior } from "./behavior.js";
 import { showAdmin } from "./admin.js";
 import { escapeHTML, notice, renderPage } from "./ui.js";
+import { installServerStatus } from "./server-status.js";
 
 let user = null;
+let applicationStarted = false;
 let pendingGradeContext = null;
 window.currentUser = null;
 
@@ -280,6 +282,7 @@ function bindInvite() {
 }
 
 async function navigate(route, selectedContext = null) {
+  if (!applicationStarted) { location.hash = route; return; }
   if (selectedContext) pendingGradeContext = selectedContext;
   const currentRoute = (location.hash.slice(1) || "home").split("?")[0];
   if (currentRoute !== route) {
@@ -312,10 +315,22 @@ document.querySelector("#logout").addEventListener("click", async () => {
 
 updateSidebar();
 restoreSession();
-const initialRoute = location.hash.slice(1).split("?")[0] || "home";
-if (new URLSearchParams(location.search).has("invite")) {
-  location.hash = "home";
-  showHome();
-} else {
-  navigate(initialRoute);
+installServerStatus({ retry: async () => {
+  await ensureServerReady(true);
+  await startApplication();
+} });
+
+async function startApplication() {
+  try { await ensureServerReady(); } catch { return; }
+  if (applicationStarted) return;
+  applicationStarted = true;
+  const initialRoute = location.hash.slice(1).split("?")[0] || "home";
+  if (new URLSearchParams(location.search).has("invite")) {
+    location.hash = "home";
+    showHome();
+  } else {
+    await navigate(initialRoute);
+  }
 }
+
+startApplication();
