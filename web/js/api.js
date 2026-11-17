@@ -1,6 +1,29 @@
+import { createServerReadiness } from "./server-readiness.js";
+
 const API = (window.APP_CONFIG?.API_BASE_URL || "").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 12_000;
 const SESSION_KEY = "school-journal-session";
+const serverReadiness = createServerReadiness({
+  baseURL: API,
+  onState: detail => window.dispatchEvent(new CustomEvent("server-state", { detail })),
+});
+
+export function ensureServerReady(force = false) {
+  return serverReadiness.wait(force);
+}
+
+async function withServer(operation) {
+  await ensureServerReady();
+  try {
+    const result = await operation();
+    serverReadiness.touch();
+    return result;
+  } catch (error) {
+    if (["network_error", "request_timeout"].includes(error.code) || error.status >= 500) serverReadiness.invalidate();
+    throw error;
+  }
+}
+
 
 let accessToken = null;
 let refreshToken = null;
@@ -87,6 +110,7 @@ async function rotateToken() {
   if (!refreshToken) return false;
   if (!refreshPromise) {
     refreshPromise = (async () => {
+      await ensureServerReady();
       const data = await withRequestTimeout(async signal => {
         const response = await fetch(`${API}/auth/refresh`, {
           method: "POST",
@@ -130,10 +154,14 @@ async function request(path, options = {}, retry = true) {
 
 export function api(path, options = {}) {
   if (!API) return Promise.reject(new Error("Укажите API_BASE_URL в web/config.js"));
-  return request(path, options);
+  return withServer(() => request(path, options));
 }
 
-export async function apiBlob(path, retry = true) {
+export function apiBlob(path) {
+  return withServer(() => requestBlob(path));
+}
+
+async function requestBlob(path, retry = true) {
   if (!API) throw new Error("Укажите API_BASE_URL в web/config.js");
   const result = await withRequestTimeout(async signal => {
     const response = await fetch(`${API}${path}`, {
@@ -147,7 +175,7 @@ export async function apiBlob(path, retry = true) {
     }
     return { blob: await response.blob() };
   });
-  if (result.response?.status === 401 && retry && accessToken && refreshToken && await rotateToken()) return apiBlob(path, false);
+  if (result.response?.status === 401 && retry && accessToken && refreshToken && await rotateToken()) return requestBlob(path, false);
   if (result.response?.status === 401) return readResponse(result.response);
   return result.blob;
 }

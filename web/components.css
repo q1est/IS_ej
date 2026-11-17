@@ -138,3 +138,20 @@ details.card { background: #fff; }
 #matrix-grade-editor:not(:empty) { margin: 16px 0 20px; padding: 16px; border: 1px solid #cdddf0; border-radius: 10px; background: #f7faff; }
 #matrix-grade-editor .new-grade { margin-bottom: 0; }
 @media (max-width: 760px) { .journal-add-mark { width: 36px; height: 36px; flex-basis: 36px; } #matrix-grade-editor:not(:empty) { padding: 10px; } }
+
+/* Server cold start: keep the current page and its form drafts underneath. */
+.server-status { width: min(460px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 32px; border: 1px solid var(--line); border-radius: 18px; background: var(--paper); color: var(--ink); text-align: center; box-shadow: 0 24px 80px rgba(15,35,62,.2); }
+.server-status::backdrop { background: rgba(24,46,78,.3); backdrop-filter: blur(4px); }
+.server-status:focus { outline: none; }
+.server-status h1 { margin: 10px 0 14px; font-size: 25px; }
+.server-status > p:not(.server-status-label) { line-height: 1.7; color: var(--ink-soft); }
+.server-status-label { margin: 22px 0 8px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .12em; }
+.server-status-icon { display: grid; width: 72px; height: 72px; margin: 0 auto; place-items: center; border-radius: 22px; background: var(--blue-soft); }
+.server-status-icon span { width: 30px; height: 30px; border: 3px solid #ccdcef; border-top-color: var(--blue); border-radius: 50%; animation: server-spin 1s linear infinite; }
+.server-status.unavailable .server-status-icon { background: var(--amber-bg); }
+.server-status.unavailable .server-status-icon span { display: grid; place-items: center; border: 0; animation: none; color: var(--amber); font-size: 30px; font-weight: 700; }
+.server-status.unavailable .server-status-icon span::before { content: "!"; }
+#server-status-retry { width: 100%; margin-top: 8px; }
+@keyframes server-spin { to { transform: rotate(360deg); } }
+@media (max-width: 480px) { .server-status { padding: 24px 20px; } .server-status h1 { font-size: 22px; } }
+@media (prefers-reduced-motion: reduce) { .server-status-icon span { animation: none; } }

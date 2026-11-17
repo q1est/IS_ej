@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
-const source = await readFile(new URL("./api.js", import.meta.url), "utf8");
+const readinessSource = await readFile(new URL("./server-readiness.js", import.meta.url), "utf8");
+const readinessURL = `data:text/javascript;base64,${Buffer.from(readinessSource).toString("base64")}`;
+const source = (await readFile(new URL("./api.js", import.meta.url), "utf8")).replace('"./server-readiness.js"', JSON.stringify(readinessURL));
 let moduleNumber = 0;
 
 function createStorage(initial = {}) {
@@ -14,7 +16,7 @@ function createStorage(initial = {}) {
   };
 }
 
-async function loadApi(t, { storage, fetchImpl }) {
+async function loadApi(t, { storage, fetchImpl, healthImpl }) {
   const previous = {
     window: globalThis.window,
     sessionStorage: globalThis.sessionStorage,
@@ -33,7 +35,9 @@ async function loadApi(t, { storage, fetchImpl }) {
     events: [],
     dispatchEvent(event) { this.events.push(event); },
   };
-  if (fetchImpl) globalThis.fetch = fetchImpl;
+  if (fetchImpl) globalThis.fetch = (url, options) => String(url).endsWith("/healthz")
+    ? healthImpl ? healthImpl(url, options) : Promise.resolve(Response.json({ status: "ok" }))
+    : fetchImpl(url, options);
   const moduleURL = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}#test-${moduleNumber++}`;
   return import(moduleURL);
 }
@@ -81,4 +85,34 @@ test("persists rotated access and refresh tokens after an expired access token",
   assert.equal(saved.access_token, "new-access");
   assert.equal(saved.refresh_token, "new-refresh");
   assert.deepEqual(saved.user, user);
+});
+
+
+test("business requests wait for health and a failed write is not replayed", async t => {
+  let releaseHealth;
+  let healthCalls = 0;
+  const calls = [];
+  const api = await loadApi(t, {
+    storage: createStorage(),
+    healthImpl: () => {
+      healthCalls++;
+      if (healthCalls === 1) return new Promise(resolve => { releaseHealth = resolve; });
+      return Promise.resolve(Response.json({ status: "ok" }));
+    },
+    fetchImpl: async (url, options) => {
+      calls.push({ url: String(url), method: options.method || "GET" });
+      if (options.method === "POST") return Response.json({ message: "Unavailable" }, { status: 503 });
+      return Response.json([]);
+    },
+  });
+  const first = api.api("/students");
+  const second = api.api("/grades");
+  assert.equal(healthCalls, 1);
+  assert.equal(calls.length, 0);
+  releaseHealth(Response.json({ status: "ok" }));
+  await Promise.all([first, second]);
+  await assert.rejects(api.api("/grades", { method: "POST", body: "{}" }), { status: 503 });
+  assert.equal(calls.filter(call => call.method === "POST").length, 1);
+  await api.api("/students");
+  assert.equal(healthCalls, 2);
 });

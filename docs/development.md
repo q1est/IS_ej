@@ -54,7 +54,7 @@ python -m http.server 5500 -d web
 go test ./...
 go test -race ./...
 go vet ./...
-node --test web/js/api.test.mjs
+node --test web/js/*.test.mjs
 ```
 
 Изолированная база нужна для API integration test:
@@ -78,14 +78,14 @@ go run ./cmd/seedadmin --email admin@example.org --name "School Admin"
 
 ## Изменение frontend
 
-Frontend использует нативные ES modules без обязательной сборки. Проверяйте изменённые файлы через `node --check`, тесты через `node --test web/js/api.test.mjs`, а функциональные состояния — браузером с локальным backend и fixtures.
+Frontend использует нативные ES modules без обязательной сборки. Проверяйте изменённые файлы через `node --check`, тесты через `node --test web/js/*.test.mjs`, а функциональные состояния — браузером с локальным backend и fixtures.
 
 ## Чеклист перед отправкой изменений
 
 - [ ] `gofmt` для изменённых Go файлов.
 - [ ] `go test ./...`.
 - [ ] `go vet ./...`.
-- [ ] `node --check` изменённых модулей и `node --test web/js/api.test.mjs`.
+- [ ] `node --check` изменённых модулей и `node --test web/js/*.test.mjs`.
 - [ ] Изменения миграций тестировались на disposable PostgreSQL.
 - [ ] Smoke-функции/UI проверены по [сценарию функционального тестирования](functional-testing.md).
 - [ ] Нет секретов/реальных данных, `.env`, пользовательских данных в логах и скриншотах.
