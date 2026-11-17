@@ -40,7 +40,7 @@ export async function showGrades(user, selectedContext = null) {
   }
 }
 
-async function loadContext(context, user, draft = null, successMessage = "", availableContexts = []) {
+async function loadContext(context, user, draft = null, successMessage = "", availableContexts = [], matrixState = {}) {
   const version = ++gradeRequest;
   const status = document.querySelector("#grade-status");
   const output = document.querySelector("#grade-result");
@@ -68,7 +68,8 @@ async function loadContext(context, user, draft = null, successMessage = "", ava
       if (edited) edited.dataset.journalDirty = "true";
     };
     let view = "matrix";
-    let subject = "";
+    let subject = matrixState.subject || "";
+    let selectedDate = matrixState.date || localDate();
     const subjects = [...new Map(grades.map(grade => [grade.subject_id, grade.subject_name])).entries()];
     const drawView = () => {
       if (view === "list") {
@@ -76,10 +77,26 @@ async function loadContext(context, user, draft = null, successMessage = "", ava
         bindTableSearch(output);
         if (canEdit) bindGradeEdits(output, context, availableContexts);
       } else {
-        output.innerHTML = `<div class="journal-view-tabs"><button class="btn" data-view="matrix" aria-pressed="true">Таблица по датам</button><button class="btn secondary" data-view="list">${canEdit ? "Список и редактирование" : "Список"}</button></div><div class="grade-tools"><label class="search-field">Найти ученика<input type="search" data-grade-search placeholder="Фамилия или имя"></label>${!context.subject_id && subjects.length > 1 ? `<label class="field-inline">Предмет<select id="matrix-subject"><option value="">Все предметы</option>${subjects.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === subject ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>` : ""}<button class="btn secondary" id="grade-export">Экспорт CSV</button>${canEdit ? `<button class="btn" id="matrix-add-grade">Добавить оценку</button>` : ""}</div><p class="muted journal-help">${context.subject_id ? "Оценки по выбранному предмету." : "Выберите предмет для отдельного просмотра."} В одной ячейке показаны все оценки за день. Средний балл — арифметический, без округления до итоговой оценки.</p>${renderGradeMatrix(grades, students, subject)}`;
+        output.innerHTML = `<div class="journal-view-tabs"><button class="btn" data-view="matrix" aria-pressed="true">Таблица по датам</button><button class="btn secondary" data-view="list">${canEdit ? "Список и редактирование" : "Список"}</button></div><div class="grade-tools"><label class="search-field">Найти ученика<input type="search" data-grade-search placeholder="Фамилия или имя"></label>${!context.subject_id && subjects.length > 1 ? `<label class="field-inline">Предмет<select id="matrix-subject"><option value="">Все предметы</option>${subjects.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === subject ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>` : ""}${canEdit ? `<label class="field-inline">Дата для выставления<input id="matrix-date" type="date" value="${escapeHTML(selectedDate)}" required></label>` : ""}<button class="btn secondary" id="grade-export">Экспорт CSV</button>${canEdit ? `<button class="btn" id="matrix-add-grade">Добавить оценку</button>` : ""}</div><p class="muted journal-help">${context.subject_id ? "Оценки по выбранному предмету." : "Выберите предмет для отдельного просмотра."} В одной ячейке показаны все оценки за день. Средний балл — арифметический, без округления до итоговой оценки.${canEdit ? " Нажмите + в ячейке, чтобы выставить оценку." : ""}</p><div id="matrix-grade-editor"></div>${renderGradeMatrix(grades, students, subject, { canEdit, extraDates: canEdit && selectedDate ? [selectedDate] : [] })}`;
         bindTableSearch(output);
-        output.querySelector("#matrix-subject")?.addEventListener("change", event => { subject = event.target.value; drawView(); });
-        output.querySelector("#matrix-add-grade")?.addEventListener("click", () => { view = "list"; drawView(); output.querySelector("#new-grade-form")?.scrollIntoView({ block: "nearest" }); });
+        const mayCloseEditor = () => !output.querySelector('#matrix-grade-editor [data-saving="true"]') && (!output.querySelector('#matrix-grade-editor [data-journal-dirty="true"]') || confirm("Есть несохранённая оценка. Продолжить без сохранения?"));
+        output.querySelector("#matrix-subject")?.addEventListener("change", event => { if (!mayCloseEditor()) { event.target.value = subject; return; } subject = event.target.value; drawView(); });
+        output.querySelector("#matrix-date")?.addEventListener("change", event => {
+          if (!event.target.value) { event.target.value = selectedDate; return; }
+          if (!mayCloseEditor()) { event.target.value = selectedDate; return; }
+          selectedDate = event.target.value; drawView();
+        });
+        const openEditor = (studentID = "", date = selectedDate) => {
+          if (!mayCloseEditor()) return;
+          const editor = output.querySelector("#matrix-grade-editor");
+          editor.innerHTML = `<div class="matrix-editor-heading"><h3>Выставить оценку</h3><button type="button" class="text-link" id="matrix-cancel-grade">Закрыть</button></div>${newGradeForm(students, { student_id: studentID, subject_id: context.subject_id || subject, work_date: date }, subjectContexts)}`;
+          editor.querySelector("#matrix-cancel-grade").addEventListener("click", () => { if (mayCloseEditor()) editor.innerHTML = ""; });
+          bindMatrixGrade(editor, context, user, availableContexts, { subject, date: selectedDate });
+          editor.querySelector('[name="value"]')?.focus({ preventScroll: true });
+          editor.scrollIntoView({ block: "nearest" });
+        };
+        output.querySelectorAll("[data-matrix-student]").forEach(button => button.addEventListener("click", () => openEditor(button.dataset.matrixStudent, button.dataset.matrixDate)));
+        output.querySelector("#matrix-add-grade")?.addEventListener("click", () => openEditor());
       }
       output.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => { if (view === button.dataset.view) return; if (output.querySelector('[data-journal-dirty="true"]') && !confirm("Есть несохранённые оценки. Сменить представление?")) return; view = button.dataset.view; drawView(); }));
       output.querySelector("#grade-export")?.addEventListener("click", exportGrades);
@@ -154,7 +171,7 @@ function gradeTypeOptions(selected) {
   return `${custom}${gradeTypes.map(item => `<option value="${item.value}" ${item.value === selected ? "selected" : ""}>${item.label}</option>`).join("")}`;
 }
 
-function bindGradeEdits(output, context, availableContexts = []) {
+function bindStudentSearch(output) {
   const studentSearch = output.querySelector("[data-student-search]");
   const studentSelect = output.querySelector('#new-grade-form [name="student_id"]');
   studentSearch?.addEventListener("input", () => {
@@ -166,6 +183,48 @@ function bindGradeEdits(output, context, availableContexts = []) {
       if (firstVisible) studentSelect.value = firstVisible.value;
     }
   });
+}
+
+function bindMatrixGrade(editor, context, user, availableContexts, matrixState) {
+  bindStudentSearch(editor);
+  const form = editor.querySelector("#new-grade-form");
+  form?.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (form.dataset.saving) return;
+    const values = new FormData(form);
+    const subjectID = values.get("subject_id");
+    const workDate = values.get("work_date");
+    const error = editor.querySelector("#new-grade-error");
+    const controls = [...editor.querySelectorAll("button,input,select")].map(control => [control, control.disabled]);
+    const submit = form.querySelector('button[type="submit"], button:not([type])');
+    const originalText = submit.textContent;
+    form.dataset.saving = "true";
+    controls.forEach(([control]) => { control.disabled = true; });
+    submit.textContent = "Сохраняю…";
+    error.textContent = "";
+    try {
+      await api("/grades", { method: "POST", body: JSON.stringify({
+        student_id: values.get("student_id"), class_id: context.class_id, subject_id: subjectID,
+        term_id: context.term_id, work_date: workDate, value: Number(values.get("value")),
+        grade_type: values.get("grade_type"), comment: values.get("comment"),
+      }) });
+      if (!editor.isConnected) return;
+      const nextIndex = availableContexts.findIndex(item => item.class_id === context.class_id && item.term_id === context.term_id && item.subject_id === subjectID);
+      const nextContext = availableContexts[nextIndex] || context;
+      if (nextIndex >= 0) document.querySelector("#grade-context").value = String(nextIndex);
+      await loadContext(nextContext, user, null, "Оценка добавлена", availableContexts, { ...matrixState, date: workDate, subject: nextContext.subject_id ? "" : subjectID });
+    } catch (reason) {
+      error.textContent = reason.status === 409 ? "На эту дату уже есть оценка за такой тип работы. Выберите другой тип работы или измените существующую оценку в режиме «Список»." : reason.message;
+    } finally {
+      delete form.dataset.saving;
+      controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+      submit.textContent = originalText;
+    }
+  });
+}
+
+function bindGradeEdits(output, context, availableContexts = []) {
+  bindStudentSearch(output);
   document.querySelector("#new-grade-form")?.addEventListener("submit", async event => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
