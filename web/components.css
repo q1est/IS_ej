@@ -129,3 +129,12 @@ details.card { background: #fff; }
 }
 @media (prefers-reduced-motion: reduce) { .student-editor { animation: none; } }
 @media print { .journal-view-tabs, .journal-help { display: none; } .journal-scroll { max-height: none; overflow: visible; } .journal-matrix th:first-child { position: static; } }
+
+.journal-add-mark { display: inline-flex; flex: 0 0 32px; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border: 1px dashed #adc1db; border-radius: 8px; background: #f6f9ff; color: var(--blue); font-size: 22px; cursor: pointer; transition: background .15s ease, border-color .15s ease; }
+.journal-add-mark:hover { background: #e4eefc; border-color: var(--blue); }
+.journal-add-mark:focus-visible { outline: 3px solid #98b8df; outline-offset: 2px; }
+.matrix-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.matrix-editor-heading h3 { margin: 0; }
+#matrix-grade-editor:not(:empty) { margin: 16px 0 20px; padding: 16px; border: 1px solid #cdddf0; border-radius: 10px; background: #f7faff; }
+#matrix-grade-editor .new-grade { margin-bottom: 0; }
+@media (max-width: 760px) { .journal-add-mark { width: 36px; height: 36px; flex-basis: 36px; } #matrix-grade-editor:not(:empty) { padding: 10px; } }

@@ -27,3 +27,13 @@ test("empty matrix keeps roster and distinguishes ungraded students", () => {
  assert.match(renderGradeMatrix([], [{id:"a",full_name:"Анна"}]), /Оценки появятся/);
  assert.match(renderGradeMatrix([], []), /Оценок пока нет/);
 });
+
+test("editable matrix adds an empty date and accessible add buttons only for active roster", () => {
+ const students = [{id:"a",full_name:"Анна"}];
+ const html = renderGradeMatrix(grades, students, "", {canEdit:true,extraDates:["2026-11-03"]});
+ assert.match(html, /datetime="2026-11-03"/);
+ assert.match(html, /data-matrix-student="a" data-matrix-date="2026-11-03"/);
+ assert.doesNotMatch(html, /data-matrix-student="b"/);
+ assert.match(html, /aria-label="Выставить оценку: Анна/);
+ assert.doesNotMatch(renderGradeMatrix(grades, students), /data-matrix-student/);
+});
