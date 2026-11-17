@@ -35,6 +35,9 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `DELETE FROM grades WHERE school_id=(SELECT school_id FROM users WHERE email='admin@demo-school.local') AND left(grade_type,12)='integration_'`); err != nil {
 		t.Fatalf("clean prior integration grades: %v", err)
 	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM behavior_scores WHERE behavior_sheet_id IN (SELECT id FROM behavior_sheets WHERE student_id IN (SELECT id FROM students WHERE external_id LIKE 'qa-student-%'))`); err != nil {
+		t.Fatalf("clean prior integration behavior scores: %v", err)
+	}
 	if _, err := db.ExecContext(ctx, `DELETE FROM behavior_sheets WHERE student_id IN (SELECT id FROM students WHERE external_id LIKE 'qa-student-%')`); err != nil {
 		t.Fatalf("clean prior integration behavior sheets: %v", err)
 	}
@@ -307,6 +310,7 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 	defer func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cleanupCancel()
+		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM behavior_scores WHERE behavior_sheet_id IN (SELECT id FROM behavior_sheets WHERE student_id=$1)`, qaStudent.ID)
 		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM behavior_sheets WHERE student_id=$1`, qaStudent.ID)
 		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM enrollments WHERE student_id=$1`, qaStudent.ID)
 		_, _ = db.ExecContext(cleanupCtx, `DELETE FROM invites WHERE email=$1`, qaStudentEmail)

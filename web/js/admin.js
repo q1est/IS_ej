@@ -1,12 +1,13 @@
 import { api, apiBlob, saveBlob } from "./api.js";
 import { escapeHTML, notice, renderPage } from "./ui.js";
+import { renderClasses } from "./classes.js";
 
 const schemas = {
   "academic-years": { label: "Учебный год", fields: [{ key: "name", title: "Название" }, { key: "starts_on", title: "Начало", type: "date" }, { key: "ends_on", title: "Окончание", type: "date" }, { key: "is_current", title: "Текущий", type: "checkbox" }] },
   classes: { label: "Класс", fields: [{ key: "name", title: "Название" }, ref("academic_year_id", "Учебный год", "academic-years")] },
   subjects: { label: "Предмет", fields: [{ key: "name", title: "Название" }] },
   terms: { label: "Период", fields: [{ key: "name", title: "Название" }, { key: "starts_on", title: "Начало", type: "date" }, { key: "ends_on", title: "Окончание", type: "date" }, ref("academic_year_id", "Учебный год", "academic-years")] },
-  students: { label: "Ученик", fields: [{ key: "external_id", title: "Табельный номер" }, { key: "full_name", title: "ФИО" }, { key: "birth_date", title: "Дата рождения", type: "date", optional: true }, { key: "class_id", title: "Класс для зачисления", type: "reference", resource: "classes", optional: true }] },
+  students: { label: "Ученик", fields: [{ key: "external_id", title: "Табельный номер (необязательно)", optional: true }, { key: "full_name", title: "ФИО" }, { key: "birth_date", title: "Дата рождения", type: "date", optional: true }, { key: "class_id", title: "Класс для зачисления", type: "reference", resource: "classes", optional: true }] },
   enrollments: { label: "Зачисление", fields: [ref("student_id", "Ученик", "students"), ref("class_id", "Класс", "classes"), ref("academic_year_id", "Учебный год", "academic-years"), { key: "from_date", title: "Дата начала", type: "date", optional: true }] },
   "teacher-assignments": { label: "Назначение учителя", fields: [ref("teacher_id", "Учитель", "users", "teacher"), ref("class_id", "Класс", "classes"), ref("subject_id", "Предмет", "subjects"), ref("academic_year_id", "Учебный год", "academic-years")] },
   "class-teacher-assignments": { label: "Классное руководство", fields: [ref("teacher_id", "Учитель", "users", "class_teacher"), ref("class_id", "Класс", "classes"), ref("academic_year_id", "Учебный год", "academic-years")] },
@@ -52,22 +53,34 @@ export async function showAdmin(state = {}) {
   }
 }
 function renderAdmin(data, state = {}) {
+  const activeTab = state.tab || (state.resource ? "resources" : "classes");
   const output = document.querySelector("#admin-content");
   const status = document.querySelector("#admin-status");
   status.className = state.message ? "success" : "muted";
   status.textContent = state.message || "";
-  output.innerHTML = `<div class="admin-layout"><nav class="admin-tabs">${[["resources", "Справочники"], ["invites", "Приглашения"], ["users", "Пользователи"], ["audit", "Аудит"]].map(([key, title], index) => `<button class="admin-tab ${index === 0 ? "selected" : ""}" data-admin-tab="${key}">${title}</button>`).join("")}</nav>
+  output.innerHTML = `<div class="admin-layout"><nav class="admin-tabs">${[["classes", "Классы"], ["resources", "Дополнительные настройки"], ["invites", "Приглашения"], ["users", "Пользователи"], ["audit", "Аудит"]].map(([key, title], index) => `<button class="admin-tab ${key === activeTab ? "selected" : ""}" data-admin-tab="${key}">${title}</button>`).join("")}</nav>
     <section id="admin-panel" class="admin-panel"></section></div>`;
   output.querySelectorAll("[data-admin-tab]").forEach(button => button.addEventListener("click", () => {
+    if (output.querySelector('[data-dirty="true"]') && !confirm("Есть несохранённые данные. Перейти в другой раздел?")) return;
+    state.tab = button.dataset.adminTab;
     output.querySelectorAll("[data-admin-tab]").forEach(item => item.classList.toggle("selected", item === button));
     const panel = output.querySelector("#admin-panel");
     const tab = button.dataset.adminTab;
+    if (tab === "classes") openClasses(panel);
     if (tab === "resources") renderResources(panel, data, state);
     if (tab === "invites") renderInvites(panel, data);
     if (tab === "users") renderUsers(panel, data);
     if (tab === "audit") renderAudit(panel, data);
   }));
-  renderResources(output.querySelector("#admin-panel"), data, state);
+  function openClasses(panel) {
+    renderClasses(panel, data, state, showAdmin, resource => {
+      state.resource = resource;
+      state.list = resource;
+      output.querySelector('[data-admin-tab="resources"]').click();
+    });
+  }
+  if (activeTab === "classes") openClasses(output.querySelector("#admin-panel"));
+  else output.querySelector(`[data-admin-tab="${activeTab}"]`)?.click();
 }
 function renderResources(panel, data, state = {}) {
   panel.innerHTML = `<section class="resource-workspace">
@@ -91,6 +104,9 @@ function renderResources(panel, data, state = {}) {
     const name = resource.value;
     const schema = schemas[name];
     panel.querySelector("#resource-form").innerHTML = `<form id="resource-create" class="form-grid">${schema.fields.map(field => renderField(field, data)).join("")}<button type="submit" class="btn">Добавить ${schema.label.toLowerCase()}</button><span id="resource-error" class="error"></span></form>`;
+    const yearInput = panel.querySelector('#resource-create [name="academic_year_id"]');
+    const currentYear = data["academic-years"].find(year => year.is_current);
+    if (yearInput && currentYear) yearInput.value = currentYear.id;
     panel.querySelector("#resource-details summary").textContent = `Добавить: ${schema.label.toLowerCase()}`;
     panel.querySelector("#resource-create").addEventListener("submit", async event => {
       event.preventDefault();

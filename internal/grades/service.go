@@ -196,26 +196,12 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		JOIN terms t ON t.id=g.term_id WHERE g.deleted_at IS NULL AND c.school_id=$1 AND g.term_id=$2`
 	args := []any{p.SchoolID, termID}
 	if !identity.IsAdmin(p) && !identity.IsStudent(p) {
-		switch {
-		case identity.HasRole(p, "teacher"):
-			var allowed bool
-			err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM teacher_assignments ta JOIN terms t ON t.id=$3 AND t.academic_year_id=ta.academic_year_id
-				WHERE ta.teacher_id=$1 AND ta.class_id=$2 AND ta.school_id=$4 AND ($5='' OR ta.subject_id::text=$5))`,
-				p.UserID, classID, termID, p.SchoolID, subjectID).Scan(&allowed)
-			if err != nil || !allowed {
-				httpx.Error(w, http.StatusForbidden, "forbidden", "No assignment for this class, subject, and period")
-				return
-			}
-		case identity.HasRole(p, "class_teacher"):
-			var allowed bool
-			err := h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM class_teacher_assignments ca JOIN terms t ON t.id=$3 AND t.academic_year_id=ca.academic_year_id
-				WHERE ca.teacher_id=$1 AND ca.class_id=$2 AND ca.school_id=$4)`, p.UserID, classID, termID, p.SchoolID).Scan(&allowed)
-			if err != nil || !allowed {
-				httpx.Error(w, http.StatusForbidden, "forbidden", "Not the class teacher of this class")
-				return
-			}
-		default:
-			httpx.Error(w, http.StatusForbidden, "forbidden", "Insufficient role")
+		var allowed bool
+		err := h.db.QueryRowContext(r.Context(), `SELECT
+            ($6 AND EXISTS(SELECT 1 FROM teacher_assignments ta JOIN terms t ON t.id=$3 AND t.academic_year_id=ta.academic_year_id WHERE ta.teacher_id=$1 AND ta.class_id=$2 AND ta.school_id=$4 AND ($5='' OR ta.subject_id::text=$5)))
+            OR ($7 AND EXISTS(SELECT 1 FROM class_teacher_assignments ca JOIN terms t ON t.id=$3 AND t.academic_year_id=ca.academic_year_id WHERE ca.teacher_id=$1 AND ca.class_id=$2 AND ca.school_id=$4))`, p.UserID, classID, termID, p.SchoolID, subjectID, identity.HasRole(p, "teacher"), identity.HasRole(p, "class_teacher")).Scan(&allowed)
+		if err != nil || !allowed {
+			httpx.Error(w, http.StatusForbidden, "forbidden", "No assignment for this class, subject, and period")
 			return
 		}
 	}
@@ -236,12 +222,17 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		query += " AND g.student_id=$" + strconv.Itoa(len(args))
 	} else if identity.IsAdmin(p) {
 		// Full school scope.
-	} else if identity.HasRole(p, "teacher") {
+	} else if identity.HasRole(p, "teacher") || identity.HasRole(p, "class_teacher") {
 		args = append(args, p.UserID)
-		query += " AND EXISTS(SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_id=$" + strconv.Itoa(len(args)) + " AND ta.class_id=g.class_id AND ta.subject_id=g.subject_id AND ta.academic_year_id=t.academic_year_id AND ta.school_id=$1)"
-	} else if identity.HasRole(p, "class_teacher") {
-		args = append(args, p.UserID)
-		query += " AND EXISTS(SELECT 1 FROM class_teacher_assignments ca WHERE ca.teacher_id=$" + strconv.Itoa(len(args)) + " AND ca.class_id=g.class_id AND ca.academic_year_id=t.academic_year_id AND ca.school_id=$1)"
+		userArg := "$" + strconv.Itoa(len(args))
+		scopes := []string{}
+		if identity.HasRole(p, "teacher") {
+			scopes = append(scopes, "EXISTS(SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_id="+userArg+" AND ta.class_id=g.class_id AND ta.subject_id=g.subject_id AND ta.academic_year_id=t.academic_year_id AND ta.school_id=$1)")
+		}
+		if identity.HasRole(p, "class_teacher") {
+			scopes = append(scopes, "EXISTS(SELECT 1 FROM class_teacher_assignments ca WHERE ca.teacher_id="+userArg+" AND ca.class_id=g.class_id AND ca.academic_year_id=t.academic_year_id AND ca.school_id=$1)")
+		}
+		query += " AND (" + strings.Join(scopes, " OR ") + ")"
 	} else {
 		httpx.Error(w, http.StatusForbidden, "forbidden", "Insufficient role")
 		return
