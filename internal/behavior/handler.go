@@ -506,6 +506,7 @@ func (h *Handler) updateScores(w http.ResponseWriter, r *http.Request) {
 	for criterionID, score := range oldScores {
 		newScores[criterionID] = score
 	}
+	seen := make(map[string]bool, len(input.Scores))
 	for _, item := range input.Scores {
 		if item.CriterionID == "" || len(item.Score) == 0 {
 			httpx.Error(w, http.StatusBadRequest, "invalid_score", "Each score must be an integer or null to clear it")
@@ -524,10 +525,11 @@ func (h *Handler) updateScores(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusBadRequest, "invalid_score", "Scores must be in the range 0..3 or null to clear a score")
 			return
 		}
-		if _, exists := newScores[item.CriterionID]; exists {
+		if seen[item.CriterionID] {
 			httpx.Error(w, http.StatusBadRequest, "duplicate_criterion", "A criterion may appear only once")
 			return
 		}
+		seen[item.CriterionID] = true
 		var maxScore int
 		err = tx.QueryRowContext(r.Context(), `SELECT bc.max_score FROM behavior_criteria bc JOIN classes c ON c.school_id=bc.school_id WHERE bc.id=$1 AND c.id=$2`, item.CriterionID, classID).Scan(&maxScore)
 		if err != nil || (score != nil && *score > maxScore) {

@@ -20,11 +20,13 @@ function ref(key, title, resource, role) { return { key, title, type: "reference
 export async function showAdmin(state = {}) {
   renderPage("Администрирование", `<h1>Управление школой</h1><p class="sub">Справочники, назначения, приглашения и аудит. Каждая операция проверяется сервером.</p>
     ${notice()}<div id="admin-status" class="muted">Загружаю данные…</div><div id="admin-content"></div>`);
+  const root = document.querySelector("#admin-content");
   const requests = [
     ...Object.keys(schemas).map(resource => [`resource:${resource}`, `/admin/${resource}`]),
     ["users", "/admin/users"], ["invites", "/admin/invites"], ["audit", "/admin/audit"],
   ];
   const results = await Promise.allSettled(requests.map(([, path]) => api(path)));
+  if (!root.isConnected) return;
   const data = {};
   const errors = {};
   results.forEach((result, index) => {
@@ -55,7 +57,7 @@ function renderAdmin(data, state = {}) {
   status.className = state.message ? "success" : "muted";
   status.textContent = state.message || "";
   output.innerHTML = `<div class="admin-layout"><nav class="admin-tabs">${[["resources", "Справочники"], ["invites", "Приглашения"], ["users", "Пользователи"], ["audit", "Аудит"]].map(([key, title], index) => `<button class="admin-tab ${index === 0 ? "selected" : ""}" data-admin-tab="${key}">${title}</button>`).join("")}</nav>
-    <section id="admin-panel"></section></div>`;
+    <section id="admin-panel" class="admin-panel"></section></div>`;
   output.querySelectorAll("[data-admin-tab]").forEach(button => button.addEventListener("click", () => {
     output.querySelectorAll("[data-admin-tab]").forEach(item => item.classList.toggle("selected", item === button));
     const panel = output.querySelector("#admin-panel");
@@ -68,20 +70,28 @@ function renderAdmin(data, state = {}) {
   renderResources(output.querySelector("#admin-panel"), data, state);
 }
 function renderResources(panel, data, state = {}) {
-  panel.innerHTML = `<section class="card excel-tools"><div><h2>Данные Excel</h2><p class="muted">Скачайте книгу школы, отредактируйте листы и загрузите её обратно. Импорт обновляет или добавляет записи, ограничен 1 000 строками и 20 МБ. Пустые строки пропускаются; ошибка отменяет весь импорт. В ведомости поведения пустая ячейка не меняет балл, для удаления укажите «УДАЛИТЬ».</p></div>
+  panel.innerHTML = `<section class="resource-workspace">
+      <div class="resource-heading"><div><span class="resource-eyebrow">СПРАВОЧНИКИ ШКОЛЫ</span><h2>Данные и назначения</h2><p class="muted">Выберите раздел, найдите запись или добавьте новую.</p></div></div>
+      <div class="resource-catalog" aria-label="Выбор справочника">${Object.entries(schemas).map(([key, schema]) => `<button type="button" class="resource-tile" data-resource="${key}" aria-pressed="false"><span>${schema.label}</span><b>${data.errors?.[key] ? "Ошибка" : (data[key] || []).length}</b></button>`).join("")}</div>
+      <label class="field-inline resource-select">Справочник<select id="admin-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label>
+      <details class="resource-create-panel card" id="resource-details"><summary>Добавить запись</summary><div id="resource-form"></div></details>
+      <div class="resource-list-heading"><h2 id="resource-list-title">Записи</h2><label class="search-field">Поиск по справочнику<input id="resource-search" type="search" placeholder="Имя, название или учебный год…"></label><span id="resource-count" class="muted" role="status"></span></div>
+      <div id="resource-table" class="table"></div>
+    </section>
+<section class="card excel-tools"><div><h2>Данные Excel</h2><p class="muted">Скачайте книгу школы, отредактируйте листы и загрузите её обратно. Импорт обновляет или добавляет записи, ограничен 1 000 строками и 20 МБ. Пустые строки пропускаются; ошибка отменяет весь импорт. В ведомости поведения пустая ячейка не меняет балл, для удаления укажите «УДАЛИТЬ».</p></div>
       <div class="toolbar"><button type="button" class="btn secondary" data-excel-download>Экспорт Excel</button><button type="button" class="btn" data-excel-select>Импорт Excel</button></div>
       <input id="excel-file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden><p id="excel-status" class="muted" aria-live="polite"></p></section>
-    <div class="toolbar"><label class="field-inline">Что добавить<select id="admin-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label></div><div id="resource-form"></div>
-    <h2>Записи</h2><label class="field-inline">Справочник<select id="admin-list-resource">${Object.entries(schemas).map(([key, schema]) => `<option value="${key}">${schema.label}</option>`).join("")}</select></label><div id="resource-table" class="table"></div>
-    <div class="toolbar"><button type="button" class="btn secondary" data-excel-download>Экспорт Excel</button><button type="button" class="btn" data-excel-select>Импорт Excel</button></div>`;
+`;
   const resource = panel.querySelector("#admin-resource");
-  const list = panel.querySelector("#admin-list-resource");
+  const list = resource;
+  const search = panel.querySelector("#resource-search");
   if (schemas[state.resource]) resource.value = state.resource;
   if (schemas[state.list]) list.value = state.list;
   const drawForm = () => {
     const name = resource.value;
     const schema = schemas[name];
-    panel.querySelector("#resource-form").innerHTML = `<form id="resource-create" class="card form-grid">${schema.fields.map(field => renderField(field, data)).join("")}<button type="submit" class="btn">Добавить ${schema.label.toLowerCase()}</button><span id="resource-error" class="error"></span></form>`;
+    panel.querySelector("#resource-form").innerHTML = `<form id="resource-create" class="form-grid">${schema.fields.map(field => renderField(field, data)).join("")}<button type="submit" class="btn">Добавить ${schema.label.toLowerCase()}</button><span id="resource-error" class="error"></span></form>`;
+    panel.querySelector("#resource-details summary").textContent = `Добавить: ${schema.label.toLowerCase()}`;
     panel.querySelector("#resource-create").addEventListener("submit", async event => {
       event.preventDefault();
       const submit = event.currentTarget.querySelector("button[type=submit]");
@@ -91,7 +101,13 @@ function renderResources(panel, data, state = {}) {
       for (const field of schema.fields) {
         const input = event.currentTarget.elements[field.key];
         if (field.type === "checkbox") body[field.key] = input.checked;
-        else if (input.value || !field.optional) body[field.key] = input.value;
+        else if (input.value || !field.optional) body[field.key] = input.value.trim();
+      }
+      if (body.starts_on && body.ends_on && body.starts_on > body.ends_on) {
+        panel.querySelector("#resource-error").textContent = "Дата окончания должна быть не раньше даты начала.";
+        submit.disabled = false;
+        submit.textContent = `Добавить ${schema.label.toLowerCase()}`;
+        return;
       }
       try {
         await api(`/admin/${name}`, { method: "POST", body: JSON.stringify(body) });
@@ -111,26 +127,52 @@ function renderResources(panel, data, state = {}) {
   };
   const drawList = () => {
     const target = panel.querySelector("#resource-table");
-    drawResourceList(target, data[list.value], data.errors?.[list.value]);
+    const name = list.value;
+    const query = search.value.trim().toLocaleLowerCase("ru");
+    const rows = data[name] || [];
+    const filtered = rows.filter(row => Object.entries(row).some(([key, value]) => resourceValue(key, value, data).toLocaleLowerCase("ru").includes(query)));
+    drawResourceList(target, filtered, data.errors?.[name], data);
+    panel.querySelector("#resource-list-title").textContent = schemas[name].label;
+    panel.querySelector("#resource-count").textContent = `Показано ${filtered.length} из ${rows.length}${rows.length >= 500 ? " · возможен лимит выдачи" : ""}`;
+    panel.querySelectorAll("[data-resource]").forEach(tile => tile.setAttribute("aria-pressed", String(tile.dataset.resource === name)));
     const retry = target.querySelector("[data-retry-resource]");
     retry?.addEventListener("click", async () => {
+      const requestedResource = list.value;
       retry.disabled = true;
       retry.textContent = "Загружаю…";
       try {
-        data[list.value] = await api(`/admin/${list.value}`);
-        delete data.errors[list.value];
+        data[requestedResource] = await api(`/admin/${requestedResource}`);
+        delete data.errors[requestedResource];
         drawList();
       } catch (error) {
-        data.errors[list.value] = error.message;
+        data.errors[requestedResource] = error.message;
         drawList();
       }
     });
   };
-  resource.addEventListener("change", drawForm);
-  list.addEventListener("change", drawList);
+  let dirty = false;
+  let selected = resource.value;
+  panel.querySelector("#resource-form").addEventListener("input", () => { dirty = true; });
+  resource.addEventListener("change", () => {
+    if (dirty && !confirm("В форме есть несохранённые данные. Перейти в другой справочник?")) { resource.value = selected; return; }
+    selected = resource.value;
+    state.resource = selected;
+    state.list = selected;
+    dirty = false;
+    search.value = "";
+    drawForm();
+    drawList();
+  });
+  panel.querySelectorAll("[data-resource]").forEach(tile => tile.addEventListener("click", () => {
+    if (tile.dataset.resource === resource.value) return;
+    resource.value = tile.dataset.resource;
+    resource.dispatchEvent(new Event("change"));
+  }));
+  search.addEventListener("input", drawList);
   panel.querySelectorAll("[data-excel-download]").forEach(button => button.addEventListener("click", async () => {
     button.disabled = true;
     const status = panel.querySelector("#excel-status");
+    status.className = "muted";
     status.textContent = "Формирую файл…";
     try {
       const blob = await apiBlob("/admin/excel");
@@ -177,16 +219,29 @@ function renderField(field, data) {
     const label = item => item.full_name || item.name || item.email || item.id;
     const help = field.resource === "users" && field.role === "teacher" && !options.length
       ? `<small class="field-hint">Учитель появится здесь после активации приглашения. Проверьте вкладку «Пользователи».</small>` : "";
-    return `<label class="field">${field.title}<select name="${field.key}" ${field.optional ? "" : "required"}><option value="">${options.length ? (field.optional ? "Не выбирать" : "Выберите…") : "Нет доступных пользователей"}</option>${options.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(label(item))}</option>`).join("")}</select>${help}</label>`;
+    return `<label class="field">${field.title}<select name="${field.key}" ${field.optional ? "" : "required"}><option value="">${options.length ? (field.optional ? "Не выбирать" : "Выберите…") : "Нет доступных записей"}</option>${options.map(item => `<option value="${escapeHTML(item.id)}">${escapeHTML(label(item))}</option>`).join("")}</select>${help}</label>`;
   }
   return `<label class="field">${field.title}<input name="${field.key}" type="${field.type || "text"}" ${field.optional ? "" : "required"}></label>`;
 }
 
-function drawResourceList(target, rows, error = "") {
+const columnTitles = { name: "Название", full_name: "ФИО", external_id: "Табельный номер", birth_date: "Дата рождения", starts_on: "Начало", ends_on: "Окончание", is_current: "Текущий год", academic_year_id: "Учебный год", class_id: "Класс", student_id: "Ученик", teacher_id: "Учитель", subject_id: "Предмет", project_id: "Проект", can_score: "Оценивание разрешено", status: "Статус" };
+const references = { academic_year_id: "academic-years", class_id: "classes", student_id: "students", teacher_id: "users", subject_id: "subjects", project_id: "projects" };
+function resourceValue(key, value, data) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (references[key]) {
+    const item = (data[references[key]] || []).find(item => item.id === value);
+    if (item) return item.full_name || item.name || item.email || String(value);
+  }
+  if (key === "status") return ({ active: "Активно", completed: "Завершено", transferred: "Переведён", withdrawn: "Выбыл" })[value] || String(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(String(value))) return String(value).split("-").reverse().join(".");
+  return String(value);
+}
+function drawResourceList(target, rows, error = "", data = {}) {
   if (error) { target.innerHTML = `<div class="notice error">${escapeHTML(error)}<button type="button" class="btn secondary" data-retry-resource>Повторить загрузку</button></div>`; return; }
-  if (!rows?.length) { target.innerHTML = `<p class="empty">Записей пока нет.</p>`; return; }
-  const columns = Object.keys(rows[0]);
-  target.innerHTML = `<table><thead><tr>${columns.map(key => `<th>${escapeHTML(key)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(key => `<td>${escapeHTML(row[key] ?? "—")}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  if (!rows?.length) { target.innerHTML = `<p class="empty">${data && target.closest("#admin-panel")?.querySelector("#resource-search")?.value.trim() ? "Ничего не найдено. Попробуйте изменить запрос." : "Записей пока нет. Добавьте первую запись через форму выше."}</p>`; return; }
+  const columns = Object.keys(rows[0]).filter(key => key !== "id");
+  target.innerHTML = `<table><thead><tr>${columns.map(key => `<th>${escapeHTML(columnTitles[key] || key)}</th>`).join("")}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(key => `<td>${escapeHTML(resourceValue(key, row[key], data))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 function renderInvites(panel, data) {
@@ -285,5 +340,5 @@ function renderAudit(panel, data) {
 
 function tableRows(rows, keys, includeHeader = false) {
   if (!rows?.length) return `<p class="empty">Записей пока нет.</p>`;
-  return `<table>${includeHeader ? `<thead><tr>${keys.map(key => `<th>${escapeHTML(key)}</th>`).join("")}</tr></thead>` : ""}<tbody>${rows.map(row => `<tr>${keys.map(key => `<td>${escapeHTML(typeof row[key] === "object" ? JSON.stringify(row[key]) : row[key])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+  return `<table>${includeHeader ? `<thead><tr>${keys.map(key => `<th>${escapeHTML(columnTitles[key] || key)}</th>`).join("")}</tr></thead>` : ""}<tbody>${rows.map(row => `<tr>${keys.map(key => `<td>${escapeHTML(typeof row[key] === "object" ? JSON.stringify(row[key]) : row[key])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }

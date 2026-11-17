@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"strings"
@@ -29,7 +30,9 @@ func New(cfg config.Config, db *sql.DB) http.Handler {
 	behavior.New(db).Register(mux, protect)
 	admin.New(db).Register(mux, protect)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		if err := db.PingContext(r.Context()); err != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
 			httpx.Error(w, http.StatusServiceUnavailable, "db_unavailable", "Database unavailable")
 			return
 		}
@@ -65,7 +68,7 @@ func securityMiddleware(allowed map[string]struct{}, next http.Handler) http.Han
 		}
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Max-Age", "600")
 			w.WriteHeader(http.StatusNoContent)
 			return
