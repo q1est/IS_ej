@@ -482,6 +482,33 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 	if !adminAttendanceCanEdit {
 		t.Fatalf("admin should receive editable attendance context for 7А: %s", body)
 	}
+
+	// Teacher and class-teacher contexts must support ordering by the current year.
+	classTeacher := loginDemoUser(t, client, server.URL, "class.teacher@demo-school.local", "Teacher2026!")
+	for role, token := range map[string]string{"teacher": teacher.AccessToken, "class_teacher": classTeacher.AccessToken} {
+		status, body = callJSON(t, client, server.URL, http.MethodGet, "/attendance/contexts", nil, token)
+		if status != http.StatusOK {
+			t.Fatalf("%s attendance contexts: %d %s", role, status, body)
+		}
+		var contexts []struct {
+			ClassID string `json:"class_id"`
+			CanEdit bool   `json:"can_edit"`
+		}
+		decodeJSON(t, body, &contexts)
+		found := false
+		for _, item := range contexts {
+			if item.ClassID == classID && item.CanEdit {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s missing editable assigned class: %s", role, body)
+		}
+		status, body = callJSON(t, client, server.URL, http.MethodGet, "/attendance?class_id="+url.QueryEscape(classID)+"&date=2026-10-31", nil, token)
+		if status != http.StatusOK {
+			t.Fatalf("%s attendance roster: %d %s", role, status, body)
+		}
+	}
 	attendanceDate := "2026-10-31"
 	attendanceNote := fmt.Sprintf("integration-test-%d", time.Now().UnixNano())
 	status, body = callJSON(t, client, server.URL, http.MethodGet,
