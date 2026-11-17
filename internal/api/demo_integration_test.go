@@ -344,6 +344,7 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 		t.Fatalf("read behavior roster after enrollment: status=%d body=%s", status, body)
 	}
 	var behaviorSheets []struct {
+		ID        string `json:"id"`
 		StudentID string `json:"student_id"`
 	}
 	decodeJSON(t, body, &behaviorSheets)
@@ -356,6 +357,68 @@ func TestDemoTeacherInvitationAssignmentAndGradeWorkflow(t *testing.T) {
 	}
 	if !foundNewStudent {
 		t.Fatalf("newly enrolled student missing from behavior roster: %s", body)
+	}
+
+	// Save all ten cells repeatedly, as the class roster does in the browser.
+	var sheetID string
+	for _, sheet := range behaviorSheets {
+		if sheet.StudentID == qaStudent.ID {
+			sheetID = sheet.ID
+		}
+	}
+	status, body = callJSON(t, client, server.URL, http.MethodGet, "/behavior/criteria", nil, admin.AccessToken)
+	if status != http.StatusOK {
+		t.Fatalf("criteria: %d %s", status, body)
+	}
+	var criteria []struct {
+		ID string `json:"id"`
+	}
+	decodeJSON(t, body, &criteria)
+	if len(criteria) != 10 {
+		t.Fatalf("expected 10 criteria, got %d", len(criteria))
+	}
+	scores := make([]map[string]any, len(criteria))
+	for i, criterion := range criteria {
+		scores[i] = map[string]any{"criterion_id": criterion.ID, "score": nil}
+	}
+	scorePath := "/behavior/sheets/" + sheetID + "/scores"
+	for i := range scores {
+		scores[i]["score"] = 3
+		status, body = callJSON(t, client, server.URL, http.MethodPatch, scorePath, map[string]any{"scores": scores}, admin.AccessToken)
+		if status != http.StatusOK {
+			t.Fatalf("save criterion %d: %d %s", i+1, status, body)
+		}
+	}
+	var result struct {
+		Total    int  `json:"total_score"`
+		Complete bool `json:"is_complete"`
+	}
+	decodeJSON(t, body, &result)
+	if result.Total != 30 || !result.Complete {
+		t.Fatalf("full sheet: %s", body)
+	}
+	// A partial edit must replace the old value and preserve the other nine.
+	status, body = callJSON(t, client, server.URL, http.MethodPatch, scorePath, map[string]any{"scores": []any{map[string]any{"criterion_id": criteria[0].ID, "score": 0}}}, admin.AccessToken)
+	if status != http.StatusOK {
+		t.Fatalf("edit saved score: %d %s", status, body)
+	}
+	decodeJSON(t, body, &result)
+	if result.Total != 27 || !result.Complete {
+		t.Fatalf("partial score edit: %s", body)
+	}
+	scores[0]["score"] = nil
+	status, body = callJSON(t, client, server.URL, http.MethodPatch, scorePath, map[string]any{"scores": scores}, admin.AccessToken)
+	if status != http.StatusOK {
+		t.Fatalf("clear saved score: %d %s", status, body)
+	}
+	decodeJSON(t, body, &result)
+	if result.Total != 27 || result.Complete {
+		t.Fatalf("incomplete sheet: %s", body)
+	}
+	// Duplicate nulls must also be rejected, even though clearing removes the score.
+	status, body = callJSON(t, client, server.URL, http.MethodPatch, scorePath, map[string]any{"scores": []any{scores[0], scores[0]}}, admin.AccessToken)
+	if status != http.StatusBadRequest || !bytes.Contains(body, []byte("duplicate_criterion")) {
+		t.Fatalf("duplicate criteria: %d %s", status, body)
 	}
 
 	status, body = callJSON(t, client, server.URL, http.MethodGet, "/grades/contexts", nil, admin.AccessToken)

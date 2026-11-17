@@ -42,3 +42,40 @@ details.card { background: #fff; }
   .form-grid, .score-form { grid-template-columns: 1fr; }
   .field-wide { grid-column: auto; }
 }
+
+/* Administration workspace */
+#admin-panel { min-width: 0; }
+.resource-workspace { display: grid; gap: 18px; }
+.resource-heading h2 { margin: 5px 0; font-size: 23px; }
+.resource-heading p { margin: 0; }
+.resource-eyebrow { color: var(--blue); font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.resource-catalog { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+.resource-tile { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 68px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: white; text-align: left; cursor: pointer; font-size: 12px; transition: transform .18s ease, border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+.resource-tile b { display: grid; min-width: 29px; height: 29px; padding: 0 6px; place-items: center; border-radius: 8px; background: var(--canvas); color: var(--muted); font-size: 11px; }
+.resource-tile:hover { transform: translateY(-2px); border-color: #9eb4cf; box-shadow: var(--shadow); }
+.resource-tile[aria-pressed="true"] { border-color: var(--blue); background: var(--blue-soft); color: var(--navy); box-shadow: inset 3px 0 var(--blue); }
+.resource-tile[aria-pressed="true"] b { background: white; color: var(--blue); }
+.resource-select { max-width: 360px; }
+.resource-create-panel { box-shadow: none; }
+.resource-create-panel summary { cursor: pointer; color: var(--navy); font-weight: 700; }
+.resource-create-panel[open] .form-grid { margin-top: 16px; animation: admin-reveal .22s ease both; }
+.resource-list-heading { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.resource-list-heading h2 { margin: 0 auto 6px 0; }
+#admin-content .excel-tools { background: linear-gradient(120deg, #fff, #eef4fb); flex-wrap: wrap; }
+#admin-content .resource-workspace + .excel-tools { margin-top: 24px; }
+#admin-content .excel-tools #excel-status { flex-basis: 100%; }
+#admin-content .admin-tab, #admin-content .btn { transition: background .18s ease, transform .18s ease, box-shadow .18s ease; }
+#admin-content .btn:active:not(:disabled) { transform: scale(.97); }
+#admin-panel > *, #resource-table table { animation: admin-reveal .24s ease both; }
+#admin-content [aria-busy="true"] { opacity: .65; }
+@keyframes admin-reveal { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 760px) {
+  .resource-catalog { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resource-tile { padding: 11px; min-height: 72px; }
+  .resource-list-heading { align-items: stretch; flex-direction: column; }
+  .resource-select { max-width: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #admin-panel *, #admin-content * { animation: none !important; transition: none !important; }
+  .resource-tile:hover { transform: none; }
+}

@@ -33,16 +33,21 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		<-ctx.Done()
 		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdown); err != nil {
 			log.Printf("graceful shutdown failed: %v", err)
+			_ = server.Close()
 		}
 	}()
 	log.Printf("listening on :%s", cfg.Port)
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("http server failed: %v", err)
 	}
+	// Keep the database open until in-flight HTTP requests finish.
+	<-shutdownDone
 }
