@@ -46,7 +46,7 @@ func (h *Handler) contexts(w http.ResponseWriter, r *http.Request) {
 			JOIN academic_years y ON y.id=e.academic_year_id AND y.school_id=e.school_id
 			WHERE s.user_id=$1 AND s.school_id=$2 AND (e.from_date IS NULL OR e.from_date<=CURRENT_DATE) AND (e.to_date IS NULL OR e.to_date>=CURRENT_DATE) ORDER BY y.name DESC,c.name LIMIT 1000`, p.UserID, p.SchoolID)
 	} else if identity.HasRole(p, "teacher") || identity.HasRole(p, "class_teacher") {
-		rows, err = h.db.QueryContext(r.Context(), `SELECT DISTINCT c.id::text,c.name,y.id::text,y.name,
+		rows, err = h.db.QueryContext(r.Context(), `SELECT c.id::text,c.name,y.id::text,y.name,
 			(EXISTS(SELECT 1 FROM teacher_assignments ta WHERE ta.teacher_id=$1 AND ta.class_id=c.id AND ta.academic_year_id=y.id AND ta.school_id=$2)
 			 OR EXISTS(SELECT 1 FROM class_teacher_assignments ca WHERE ca.teacher_id=$1 AND ca.class_id=c.id AND ca.academic_year_id=y.id AND ca.school_id=$2))
 			FROM classes c JOIN academic_years y ON y.id=c.academic_year_id AND y.school_id=c.school_id
