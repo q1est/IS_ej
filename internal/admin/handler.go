@@ -21,6 +21,7 @@ type Handler struct{ db *sql.DB }
 func New(db *sql.DB) *Handler { return &Handler{db: db} }
 
 func (h *Handler) Register(mux *http.ServeMux, protect func(http.Handler) http.Handler) {
+	mux.Handle("POST /admin/classes/{id}/students", protect(http.HandlerFunc(h.addClassStudents)))
 	mux.Handle("POST /invites", protect(http.HandlerFunc(h.createInvite)))
 	mux.Handle("GET /admin/users", protect(http.HandlerFunc(h.listUsers)))
 	mux.Handle("PATCH /admin/users/{id}", protect(http.HandlerFunc(h.updateUser)))
@@ -507,10 +508,18 @@ func resourceInsert(resource string, body map[string]json.RawMessage, p identity
 			JOIN user_roles ur ON ur.user_id=u.id AND ur.school_id=u.school_id JOIN roles r ON r.id=ur.role_id AND r.code='teacher'
 			WHERE u.id=$1 RETURNING id::text`, []any{get("teacher_id"), get("class_id"), get("academic_year_id"), getBool("can_score")}, nil
 	case "students":
-		if err := missing("external_id", "full_name"); err != nil {
+		if err := missing("full_name"); err != nil {
 			return "", nil, err
 		}
-		return `INSERT INTO students(school_id,external_id,full_name,birth_date) VALUES($1,$2,$3,NULLIF($4,'')::date) RETURNING id::text`, []any{p.SchoolID, get("external_id"), get("full_name"), get("birth_date")}, nil
+		number := get("external_id")
+		if number == "" {
+			var err error
+			number, err = studentNumber()
+			if err != nil {
+				return "", nil, err
+			}
+		}
+		return `INSERT INTO students(school_id,external_id,full_name,birth_date) VALUES($1,$2,$3,NULLIF($4,'')::date) RETURNING id::text`, []any{p.SchoolID, number, get("full_name"), get("birth_date")}, nil
 	case "enrollments":
 		if err := missing("student_id", "class_id", "academic_year_id"); err != nil {
 			return "", nil, err

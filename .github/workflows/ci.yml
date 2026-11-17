@@ -39,8 +39,8 @@ jobs:
         with:
           node-version: 22
       - run: go mod download
-      - name: Test browser session persistence helpers
-        run: node --test web/js/api.test.mjs
+      - name: Test browser modules
+        run: node --test web/js/*.test.mjs
       - name: Check browser module syntax
         shell: bash
         run: |
@@ -57,7 +57,7 @@ jobs:
         shell: bash
         run: |
           bash scripts/validate-demo-seed.sh
-      - name: Run demo API workflow smoke test
+      - name: Run API workflows against PostgreSQL
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/school_journal
-        run: go test ./internal/api -run TestDemoTeacherInvitationAssignmentAndGradeWorkflow -count=1 -v
+        run: go test ./internal/api -count=1 -v

@@ -1,4 +1,6 @@
 import { api, toCSV } from "./api.js";
+import { renderGradeMatrix } from "./grade-matrix.js";
+let gradeRequest = 0;
 import { escapeHTML, notice, renderPage, localDate, showNoContexts } from "./ui.js";
 
 export async function showGrades(user, selectedContext = null) {
@@ -10,6 +12,7 @@ export async function showGrades(user, selectedContext = null) {
   document.querySelector("#grade-refresh").addEventListener("click", () => showGrades(user, selectedContext));
   try {
     const contexts = await api("/grades/contexts");
+    if (!selector.isConnected) return;
     if (!contexts.length) {
       showNoContexts(status, user, selector);
       return;
@@ -22,7 +25,12 @@ export async function showGrades(user, selectedContext = null) {
         && (item.subject_id || "") === (selectedContext.subject_id || ""));
       if (selectedIndex >= 0) selector.value = String(selectedIndex);
     }
-    const load = () => loadContext(contexts[Number(selector.value)], user, null, "", contexts);
+    let selectedIndex = selector.value;
+    const load = () => {
+      if (document.querySelector('[data-journal-dirty="true"]') && !confirm("Есть несохранённые оценки. Сменить журнал?")) { selector.value = selectedIndex; return; }
+      selectedIndex = selector.value;
+      return loadContext(contexts[Number(selector.value)], user, null, "", contexts);
+    };
     selector.addEventListener("change", load);
     await load();
   } catch (error) {
@@ -33,6 +41,7 @@ export async function showGrades(user, selectedContext = null) {
 }
 
 async function loadContext(context, user, draft = null, successMessage = "", availableContexts = []) {
+  const version = ++gradeRequest;
   const status = document.querySelector("#grade-status");
   const output = document.querySelector("#grade-result");
   status.textContent = "Загружаю журнал…";
@@ -41,33 +50,47 @@ async function loadContext(context, user, draft = null, successMessage = "", ava
     const params = new URLSearchParams({ class_id: context.class_id, term_id: context.term_id });
     if (context.subject_id) params.set("subject_id", context.subject_id);
     const isStudent = user.roles.includes("student") && !user.roles.includes("admin");
-    const isClassTeacher = user.roles.includes("class_teacher") && !context.subject_id && !isStudent;
-    if (isClassTeacher) {
-      const rows = await api(`/grades/class-summary?${params}`);
-      output.innerHTML = rows.length
-        ? `<div class="grade-tools"><label class="search-field"><span>Найти ученика</span><input type="search" data-grade-search placeholder="Фамилия или имя"></label></div>${table(["Ученик", "Предмет", "Средний балл", "Оценок"], rows.map(row => [row.student, row.subject, row.average ?? "—", row.count]))}`
-        : `<p class="empty">В этом периоде пока нет оценок.</p>`;
-      bindTableSearch(output);
-      status.textContent = "Сводная ведомость доступна только для чтения.";
-      return;
-    }
-
     const canEdit = Boolean(context.can_edit) && !isStudent;
     const [grades, students] = await Promise.all([
       api(`/grades?${params}`),
-      canEdit ? api(`/students?class_id=${encodeURIComponent(context.class_id)}&limit=500`) : Promise.resolve([]),
+      !isStudent ? api(`/students?class_id=${encodeURIComponent(context.class_id)}&limit=500`) : Promise.resolve([]),
     ]);
+    if (!output.isConnected || version !== gradeRequest) return;
     status.textContent = `${grades.length ? `Записей: ${grades.length}${grades.length === 1000 ? " (достигнут лимит выдачи)" : ""}` : "Оценок пока нет."}${successMessage ? ` · ${successMessage}` : ""}`;
     const subjectContexts = availableContexts.filter(item => item.class_id === context.class_id && item.term_id === context.term_id && item.subject_id && item.can_edit);
-    const createForm = canEdit ? newGradeForm(students, draft, subjectContexts) : "";
+    const createForm = canEdit ? newGradeForm(students, draft || { subject_id: context.subject_id }, subjectContexts) : "";
     const rows = grades.map(grade => canEdit ? editableGradeRow(grade) : [grade.student_name, grade.work_date, grade.value, gradeTypeLabel(grade.grade_type), grade.comment]);
     output.innerHTML = `${createForm}${grades.length ? `<div class="grade-tools"><label class="search-field"><span>Найти ученика</span><input type="search" data-grade-search placeholder="Фамилия или имя"></label><button class="btn secondary" id="grade-export">Экспорт CSV</button></div>${table(canEdit ? ["Ученик", "Дата", "Оценка", "Тип работы", "Комментарий", "Действия"] : ["Ученик", "Дата", "Оценка", "Тип работы", "Комментарий"], rows, canEdit)}` : `<p class="empty">Оценок пока нет.</p><div class="toolbar"><button class="btn secondary" id="grade-export">Экспорт CSV</button></div>`}
       <p id="grade-action-status" class="error" aria-live="polite"></p>`;
-    bindTableSearch(output);
-    document.querySelector("#grade-export")?.addEventListener("click", () => toCSV("grades.csv", [["Ученик", "Дата", "Оценка", "Тип работы", "Комментарий"], ...grades.map(row => [row.student_name, row.work_date, row.value, gradeTypeLabel(row.grade_type), row.comment])]));
-    if (canEdit) bindGradeEdits(output, context, availableContexts);
+    const listHTML = output.innerHTML;
+    output.oninput = event => {
+      const edited = event.target.closest("#new-grade-form, tr[data-grade]");
+      if (edited) edited.dataset.journalDirty = "true";
+    };
+    let view = "matrix";
+    let subject = "";
+    const subjects = [...new Map(grades.map(grade => [grade.subject_id, grade.subject_name])).entries()];
+    const drawView = () => {
+      if (view === "list") {
+        output.innerHTML = `<div class="journal-view-tabs"><button class="btn secondary" data-view="matrix">Таблица по датам</button><button class="btn" data-view="list" aria-pressed="true">${canEdit ? "Список и редактирование" : "Список"}</button></div>${listHTML}`;
+        bindTableSearch(output);
+        if (canEdit) bindGradeEdits(output, context, availableContexts);
+      } else {
+        output.innerHTML = `<div class="journal-view-tabs"><button class="btn" data-view="matrix" aria-pressed="true">Таблица по датам</button><button class="btn secondary" data-view="list">${canEdit ? "Список и редактирование" : "Список"}</button></div><div class="grade-tools"><label class="search-field">Найти ученика<input type="search" data-grade-search placeholder="Фамилия или имя"></label>${!context.subject_id && subjects.length > 1 ? `<label class="field-inline">Предмет<select id="matrix-subject"><option value="">Все предметы</option>${subjects.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === subject ? "selected" : ""}>${escapeHTML(name)}</option>`).join("")}</select></label>` : ""}<button class="btn secondary" id="grade-export">Экспорт CSV</button>${canEdit ? `<button class="btn" id="matrix-add-grade">Добавить оценку</button>` : ""}</div><p class="muted journal-help">${context.subject_id ? "Оценки по выбранному предмету." : "Выберите предмет для отдельного просмотра."} В одной ячейке показаны все оценки за день. Средний балл — арифметический, без округления до итоговой оценки.</p>${renderGradeMatrix(grades, students, subject)}`;
+        bindTableSearch(output);
+        output.querySelector("#matrix-subject")?.addEventListener("change", event => { subject = event.target.value; drawView(); });
+        output.querySelector("#matrix-add-grade")?.addEventListener("click", () => { view = "list"; drawView(); output.querySelector("#new-grade-form")?.scrollIntoView({ block: "nearest" }); });
+      }
+      output.querySelectorAll("[data-view]").forEach(button => button.addEventListener("click", () => { if (view === button.dataset.view) return; if (output.querySelector('[data-journal-dirty="true"]') && !confirm("Есть несохранённые оценки. Сменить представление?")) return; view = button.dataset.view; drawView(); }));
+      output.querySelector("#grade-export")?.addEventListener("click", exportGrades);
+    };
+    const exportGrades = () => {
+      const visible = view === "matrix" && subject ? grades.filter(grade => grade.subject_id === subject) : grades;
+      toCSV("grades.csv", [["Ученик", "Предмет", "Дата", "Оценка", "Тип работы", "Комментарий"], ...visible.map(row => [row.student_name, row.subject_name, row.work_date, row.value, gradeTypeLabel(row.grade_type), row.comment])]);
+    };
+    drawView();
   } catch (error) {
-    status.textContent = error.message;
+    if (output.isConnected && version === gradeRequest) status.textContent = error.message;
   }
 }
 
@@ -173,7 +196,7 @@ function bindGradeEdits(output, context, availableContexts = []) {
       await api(`/grades/${encodeURIComponent(row.dataset.grade)}`, { method: "PATCH", body: JSON.stringify({
         work_date: body.work_date, value: Number(body.value), grade_type: body.grade_type, comment: body.comment,
       }) });
-      await loadContext(context, window.currentUser, null, "Изменения сохранены");
+      await loadContext(context, window.currentUser, null, "Изменения сохранены", availableContexts);
     } catch (error) { output.querySelector("#grade-action-status").textContent = error.message; }
   }));
   output.querySelectorAll("[data-delete-grade]").forEach(button => button.addEventListener("click", async () => {
@@ -181,7 +204,7 @@ function bindGradeEdits(output, context, availableContexts = []) {
     if (!confirm("Удалить эту оценку? Она останется в аудите.")) return;
     try {
       await api(`/grades/${encodeURIComponent(row.dataset.grade)}`, { method: "DELETE" });
-      await loadContext(context, window.currentUser, null, "Оценка удалена");
+      await loadContext(context, window.currentUser, null, "Оценка удалена", availableContexts);
     } catch (error) { output.querySelector("#grade-action-status").textContent = error.message; }
   }));
 }
